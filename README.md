@@ -1,6 +1,14 @@
 # Claude Code Sandbox
 
-Run Claude Code as an autonomous agent inside Docker containers with automatic git integration.
+> [!WARNING]
+>
+> - This work is alpha and might have security issues, use at your own risk.
+> - Check [TODO.md](./TODO.md) for the roadmap.
+> - Email [dev@textcortex.com](mailto:dev@textcortex.com) for inquiries.
+
+Run Claude Code as an autonomous agent inside Docker containers with automatic GitHub integration. Bypass all permissions safely.
+
+<img width="1485" alt="Screenshot 2025-05-27 at 14 48 25" src="https://github.com/user-attachments/assets/c014b8f5-7f14-43fd-bf8e-bf41787f8ec8" />
 
 ## Why Claude Code Sandbox?
 
