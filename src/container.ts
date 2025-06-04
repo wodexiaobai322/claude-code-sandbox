@@ -573,11 +573,14 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       // Also copy .git directory to preserve git history
       console.log(chalk.blue("• Copying git history..."));
       const gitTarFile = `/tmp/claude-sandbox-git-${Date.now()}.tar`;
-      // Exclude macOS resource fork files when creating git archive
-      execSync(`tar -cf "${gitTarFile}" --exclude="._*" .git`, {
-        cwd: workDir,
-        stdio: "pipe",
-      });
+      // Exclude macOS resource fork files and .DS_Store when creating git archive
+      execSync(
+        `tar -cf "${gitTarFile}" --exclude="._*" --exclude=".DS_Store" .git`,
+        {
+          cwd: workDir,
+          stdio: "pipe",
+        },
+      );
 
       try {
         const gitStream = fs.createReadStream(gitTarFile);

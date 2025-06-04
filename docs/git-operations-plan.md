@@ -39,6 +39,7 @@ This plan outlines how to safely handle Git operations (commit, push, PR) outsid
    ```
 
 2. **Shadow Repository Setup (Optimized)**
+
    ```typescript
    class ShadowRepository {
      private shadowPath: string;

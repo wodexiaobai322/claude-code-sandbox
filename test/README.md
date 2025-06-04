@@ -48,12 +48,12 @@ Tests are written using Jest with TypeScript support. The Jest configuration is 
 ### Example Unit Test
 
 ```typescript
-import { someFunction } from '../../src/someModule';
+import { someFunction } from "../../src/someModule";
 
-describe('someFunction', () => {
-  it('should do something', () => {
-    const result = someFunction('input');
-    expect(result).toBe('expected output');
+describe("someFunction", () => {
+  it("should do something", () => {
+    const result = someFunction("input");
+    expect(result).toBe("expected output");
   });
 });
 ```
@@ -61,6 +61,7 @@ describe('someFunction', () => {
 ## E2E Tests
 
 End-to-end tests are located in `test/e2e/` and test the complete workflow of the CLI tool. These tests:
+
 - Create actual Docker containers
 - Run Claude commands
 - Verify git operations
