@@ -26,8 +26,19 @@
     "sandbox",
     "automation"
   ],
-  "author": "",
+  "author": "TextCortex Dev Team",
   "license": "MIT",
+  "homepage": "https://github.com/textcortex/claude-code-sandbox#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/textcortex/claude-code-sandbox.git"
+  },
+  "bugs": {
+    "url": "https://github.com/textcortex/claude-code-sandbox/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@types/express": "^5.0.2",
     "@types/ws": "^8.18.1",
