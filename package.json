@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-sandbox",
+  "name": "@textcortex/claude-code-sandbox",
   "version": "0.1.0",
   "description": "Run Claude Code as an autonomous agent in Docker containers with git integration",
   "main": "dist/index.js",
@@ -51,6 +51,7 @@
     "@types/dockerode": "^3.3.23",
     "@types/fs-extra": "^11.0.4",
     "@types/inquirer": "^9.0.8",
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.11.5",
     "@types/puppeteer": "^5.4.7",
     "@types/socket.io-client": "^1.4.36",
