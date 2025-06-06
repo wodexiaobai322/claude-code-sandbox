@@ -182,9 +182,9 @@ export class ShadowRepository {
     }
   }
 
-  private async prepareGitignoreExcludes(): Promise<void> {
+  private async prepareRsyncRules(): Promise<void> {
     try {
-      // Start with built-in excludes
+      // Start with built-in excludes that should never be synced
       const excludes: string[] = [
         ".git",
         ".git/**",
@@ -201,6 +201,25 @@ export class ShadowRepository {
         ".DS_Store",
         "Thumbs.db",
       ];
+
+      // Get list of git-tracked files to ensure they're always included
+      let trackedFiles: string[] = [];
+      try {
+        const { stdout } = await execAsync("git ls-files", {
+          cwd: this.options.originalRepo,
+        });
+        trackedFiles = stdout
+          .trim()
+          .split("\n")
+          .filter((f) => f.trim());
+        console.log(
+          chalk.gray(`  Found ${trackedFiles.length} git-tracked files`),
+        );
+      } catch (error) {
+        console.log(
+          chalk.yellow("  Warning: Could not get git-tracked files:", error),
+        );
+      }
 
       // Check for .gitignore in original repo
       const gitignorePath = path.join(this.options.originalRepo, ".gitignore");
@@ -238,26 +257,141 @@ export class ShadowRepository {
         }
       }
 
-      // Write excludes to file
-      await fs.writeFile(this.rsyncExcludeFile, excludes.join("\n"));
+      // Create include patterns for all git-tracked files
+      // This ensures git-tracked files are synced even if they match gitignore patterns
+      const includes: string[] = [];
+      for (const file of trackedFiles) {
+        includes.push(`+ ${file}`);
+        // Also include parent directories
+        const parts = file.split("/");
+        for (let i = 1; i < parts.length; i++) {
+          const dir = parts.slice(0, i).join("/");
+          includes.push(`+ ${dir}/`);
+        }
+      }
+
+      // Remove duplicates from includes
+      const uniqueIncludes = [...new Set(includes)];
+
+      // Write the rsync rules file: includes first, then excludes
+      // Rsync processes rules in order, so includes must come before excludes
+      const allRules = [...uniqueIncludes, ...excludes.map((e) => `- ${e}`)];
+      await fs.writeFile(this.rsyncExcludeFile, allRules.join("\n"));
+
       console.log(
         chalk.gray(
-          `  Created rsync exclude file with ${excludes.length} patterns`,
+          `  Created rsync rules file with ${uniqueIncludes.length} includes and ${excludes.length} excludes`,
         ),
       );
     } catch (error) {
       console.log(
-        chalk.yellow("  Warning: Could not prepare gitignore excludes:", error),
+        chalk.yellow("  Warning: Could not prepare rsync rules:", error),
       );
       // Create a basic exclude file with just the essentials
       const basicExcludes = [
-        ".git",
-        "node_modules",
-        ".next",
-        "__pycache__",
-        ".venv",
+        "- .git",
+        "- node_modules",
+        "- .next",
+        "- __pycache__",
+        "- .venv",
       ];
       await fs.writeFile(this.rsyncExcludeFile, basicExcludes.join("\n"));
+    }
+  }
+
+  async resetToContainerBranch(containerId: string): Promise<void> {
+    console.log(
+      chalk.blue("🔄 Resetting shadow repo to match container branch..."),
+    );
+
+    try {
+      // Ensure shadow repo is initialized first
+      if (!this.initialized) {
+        await this.initialize();
+      }
+
+      // Get the current branch from the container
+      const { stdout: containerBranch } = await execAsync(
+        `docker exec ${containerId} git -C /workspace rev-parse --abbrev-ref HEAD`,
+      );
+      const targetBranch = containerBranch.trim();
+      console.log(chalk.blue(`  Container is on branch: ${targetBranch}`));
+
+      // Get the current branch in shadow repo (if it has one)
+      let currentShadowBranch = "";
+      try {
+        const { stdout: shadowBranch } = await execAsync(
+          "git rev-parse --abbrev-ref HEAD",
+          { cwd: this.shadowPath },
+        );
+        currentShadowBranch = shadowBranch.trim();
+        console.log(chalk.blue(`  Shadow repo is on: ${currentShadowBranch}`));
+      } catch (error) {
+        console.log(chalk.blue(`  Shadow repo has no HEAD yet`));
+      }
+
+      if (targetBranch !== currentShadowBranch) {
+        console.log(
+          chalk.blue(`  Resetting shadow repo to match container...`),
+        );
+
+        // Fetch all branches from the original repo
+        try {
+          await execAsync("git fetch origin", { cwd: this.shadowPath });
+        } catch (error) {
+          console.warn(chalk.yellow("Warning: Failed to fetch from origin"));
+        }
+
+        // Check if the target branch exists remotely and create/checkout accordingly
+        try {
+          // Try to checkout the branch if it exists remotely and reset to match it
+          await execAsync(
+            `git checkout -B ${targetBranch} origin/${targetBranch}`,
+            { cwd: this.shadowPath },
+          );
+          console.log(
+            chalk.green(
+              `✓ Shadow repo reset to remote branch: ${targetBranch}`,
+            ),
+          );
+        } catch (error) {
+          try {
+            // If that fails, try to checkout locally existing branch
+            await execAsync(`git checkout ${targetBranch}`, {
+              cwd: this.shadowPath,
+            });
+            console.log(
+              chalk.green(
+                `✓ Shadow repo switched to local branch: ${targetBranch}`,
+              ),
+            );
+          } catch (localError) {
+            // If that fails too, create a new branch
+            await execAsync(`git checkout -b ${targetBranch}`, {
+              cwd: this.shadowPath,
+            });
+            console.log(
+              chalk.green(`✓ Shadow repo created new branch: ${targetBranch}`),
+            );
+          }
+        }
+
+        // Mark that we need to resync after branch reset
+        console.log(
+          chalk.blue(`✓ Branch reset complete - files will be synced next`),
+        );
+      } else {
+        console.log(
+          chalk.gray(
+            `  Shadow repo already on correct branch: ${targetBranch}`,
+          ),
+        );
+      }
+    } catch (error) {
+      console.warn(
+        chalk.yellow("⚠ Failed to reset shadow repo branch:"),
+        error,
+      );
     }
   }
 
@@ -271,8 +405,8 @@ export class ShadowRepository {
 
     console.log(chalk.blue("🔄 Syncing files from container..."));
 
-    // Prepare gitignore excludes
-    await this.prepareGitignoreExcludes();
+    // Prepare rsync rules
+    await this.prepareRsyncRules();
 
     // First, ensure files in container are owned by claude user
     try {

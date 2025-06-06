@@ -68,6 +68,91 @@ export class WebUIServer {
         res.status(500).json({ error: "Failed to list containers" });
       }
     });
+
+    // Git info endpoint - get current branch and PRs
+    this.app.get("/api/git/info", async (req, res) => {
+      try {
+        const containerId = req.query.containerId as string;
+        let currentBranch = "loading...";
+        let workingDir = this.originalRepo || process.cwd();
+
+        // If containerId is provided, try to get branch from shadow repo
+        if (containerId && this.shadowRepos.has(containerId)) {
+          const shadowRepo = this.shadowRepos.get(containerId)!;
+          const shadowPath = shadowRepo.getPath();
+          if (shadowPath) {
+            try {
+              const branchResult = await execAsync(
+                "git rev-parse --abbrev-ref HEAD",
+                {
+                  cwd: shadowPath,
+                },
+              );
+              currentBranch = branchResult.stdout.trim();
+              // Use original repo for PR lookup (PRs are created against the main repo)
+            } catch (error) {
+              console.warn("Could not get branch from shadow repo:", error);
+            }
+          }
+        } else {
+          // Fallback to original repo
+          const branchResult = await execAsync(
+            "git rev-parse --abbrev-ref HEAD",
+            {
+              cwd: workingDir,
+            },
+          );
+          currentBranch = branchResult.stdout.trim();
+        }
+
+        // Get repository remote URL for branch links
+        let repoUrl = "";
+        try {
+          const remoteResult = await execAsync("git remote get-url origin", {
+            cwd: this.originalRepo || process.cwd(),
+          });
+          const remoteUrl = remoteResult.stdout.trim();
+
+          // Convert SSH URLs to HTTPS for web links
+          if (remoteUrl.startsWith("git@github.com:")) {
+            repoUrl = remoteUrl
+              .replace("git@github.com:", "https://github.com/")
+              .replace(".git", "");
+          } else if (remoteUrl.startsWith("https://")) {
+            repoUrl = remoteUrl.replace(".git", "");
+          }
+        } catch (error) {
+          console.warn("Could not get repository URL:", error);
+        }
+
+        // Get PR info using GitHub CLI (always use original repo)
+        let prs = [];
+        try {
+          const prResult = await execAsync(
+            `gh pr list --head "${currentBranch}" --json number,title,state,url,isDraft,mergeable`,
+            {
+              cwd: this.originalRepo || process.cwd(),
+            },
+          );
+          prs = JSON.parse(prResult.stdout || "[]");
+        } catch (error) {
+          // GitHub CLI might not be installed or not authenticated
+          console.warn("Could not fetch PR info:", error);
+        }
+
+        const branchUrl = repoUrl ? `${repoUrl}/tree/${currentBranch}` : "";
+
+        res.json({
+          currentBranch,
+          branchUrl,
+          repoUrl,
+          prs,
+        });
+      } catch (error) {
+        console.error("Failed to get git info:", error);
+        res.status(500).json({ error: "Failed to get git info" });
+      }
+    });
   }
 
   private setupSocketHandlers(): void {
@@ -376,6 +461,7 @@ export class WebUIServer {
 
     try {
       // Initialize shadow repo if not exists
+      let isNewShadowRepo = false;
       if (!this.shadowRepos.has(containerId)) {
         const shadowRepo = new ShadowRepository({
           originalRepo: this.originalRepo || process.cwd(),
@@ -383,11 +469,41 @@ export class WebUIServer {
           sessionId: containerId.substring(0, 12),
         });
         this.shadowRepos.set(containerId, shadowRepo);
+        isNewShadowRepo = true;
+
+        // Reset shadow repo to match container's branch (important for PR/remote branch scenarios)
+        await shadowRepo.resetToContainerBranch(containerId);
       }
 
       // Sync files from container (inotify already told us there are changes)
       const shadowRepo = this.shadowRepos.get(containerId)!;
       await shadowRepo.syncFromContainer(containerId);
+
+      // If this is a new shadow repo, establish a clean baseline after the first sync
+      if (isNewShadowRepo) {
+        console.log(
+          chalk.blue("🔄 Establishing clean baseline for new shadow repo..."),
+        );
+        const shadowPath = shadowRepo.getPath();
+
+        try {
+          // Stage all synced files and create a baseline commit
+          await execAsync("git add -A", { cwd: shadowPath });
+          await execAsync(
+            'git commit -m "Establish baseline from container content" --allow-empty',
+            { cwd: shadowPath },
+          );
+          console.log(chalk.green("✓ Clean baseline established"));
+
+          // Now do one more sync to see if there are any actual changes
+          await shadowRepo.syncFromContainer(containerId);
+        } catch (baselineError) {
+          console.warn(
+            chalk.yellow("Warning: Could not establish baseline"),
+            baselineError,
+          );
+        }
+      }
 
       // Check if shadow repo actually has git initialized
       const shadowPath = shadowRepo.getPath();
@@ -404,7 +520,9 @@ export class WebUIServer {
 
       // Get changes summary and diff data
       const changes = await shadowRepo.getChanges();
-      console.log(chalk.gray(`[MONITOR] Shadow repo changes:`, changes));
+      console.log(
+        chalk.gray(`[MONITOR] Shadow repo changes: ${changes.summary}`),
+      );
 
       let diffData = null;
 

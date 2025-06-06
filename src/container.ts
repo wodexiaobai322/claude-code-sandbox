@@ -50,7 +50,12 @@ export class ContainerManager {
     console.log(chalk.green("✓ Container ready"));
 
     // Set up git branch and startup script
-    await this.setupGitAndStartupScript(container, containerConfig.branchName);
+    await this.setupGitAndStartupScript(
+      container,
+      containerConfig.branchName,
+      containerConfig.prFetchRef,
+      containerConfig.remoteFetchRef,
+    );
 
     // Run setup commands
     await this.runSetupCommands(container);
@@ -497,6 +502,18 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     const { execSync } = require("child_process");
     const fs = require("fs");
 
+    // Helper function to get tar flags safely
+    const getTarFlags = () => {
+      try {
+        // Test if --no-xattrs is supported by checking tar help
+        execSync("tar --help 2>&1 | grep -q no-xattrs", { stdio: "pipe" });
+        return "--no-xattrs";
+      } catch {
+        // --no-xattrs not supported, use standard tar
+        return "";
+      }
+    };
+
     try {
       // Get list of git-tracked files (including uncommitted changes)
       const trackedFiles = execSync("git ls-files", {
@@ -575,8 +592,9 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       const gitTarFile = `/tmp/claude-sandbox-git-${Date.now()}.tar`;
       // Exclude macOS resource fork files and .DS_Store when creating git archive
       // Also strip extended attributes to prevent macOS xattr issues in Docker
+      const tarFlags = getTarFlags();
       execSync(
-        `tar -cf "${gitTarFile}" --exclude="._*" --exclude=".DS_Store" --no-xattrs .git`,
+        `tar -cf "${gitTarFile}" --exclude="._*" --exclude=".DS_Store" ${tarFlags} .git`,
         {
           cwd: workDir,
           stdio: "pipe",
@@ -614,6 +632,18 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     const os = require("os");
     const path = require("path");
     const { execSync } = require("child_process");
+
+    // Helper function to get tar flags safely
+    const getTarFlags = () => {
+      try {
+        // Test if --no-xattrs is supported by checking tar help
+        execSync("tar --help 2>&1 | grep -q no-xattrs", { stdio: "pipe" });
+        return "--no-xattrs";
+      } catch {
+        // --no-xattrs not supported, use standard tar
+        return "";
+      }
+    };
 
     try {
       // First, try to get credentials from macOS Keychain if on Mac
@@ -754,9 +784,13 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
         console.log(chalk.blue("• Copying .claude directory..."));
 
         const tarFile = `/tmp/claude-dir-${Date.now()}.tar`;
-        execSync(`tar -cf "${tarFile}" --no-xattrs -C "${os.homedir()}" .claude`, {
-          stdio: "pipe",
-        });
+        const tarFlags = getTarFlags();
+        execSync(
+          `tar -cf "${tarFile}" ${tarFlags} -C "${os.homedir()}" .claude`,
+          {
+            stdio: "pipe",
+          },
+        );
 
         const stream = fs.createReadStream(tarFile);
         await container.putArchive(stream, {
@@ -869,6 +903,8 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
   private async setupGitAndStartupScript(
     container: any,
     branchName: string,
+    prFetchRef?: string,
+    remoteFetchRef?: string,
   ): Promise<void> {
     console.log(chalk.blue("• Setting up git branch and startup script..."));
 
@@ -916,13 +952,37 @@ exec /bin/bash`;
           git config --global url."https://\${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
           echo "✓ Configured git to use GitHub token"
         fi &&
-        # Try to checkout existing branch first, then create new if it doesn't exist
-        if git show-ref --verify --quiet refs/heads/"${branchName}"; then
-          git checkout "${branchName}" &&
-          echo "✓ Switched to existing branch: ${branchName}"
+        # Handle different branch setup scenarios
+        if [ -n "${prFetchRef || ""}" ]; then
+          echo "• Fetching PR branch..." &&
+          git fetch origin ${prFetchRef} &&
+          if git show-ref --verify --quiet refs/heads/"${branchName}"; then
+            git checkout "${branchName}" &&
+            echo "✓ Switched to existing PR branch: ${branchName}"
+          else
+            git checkout "${branchName}" &&
+            echo "✓ Checked out PR branch: ${branchName}"
+          fi
+        elif [ -n "${remoteFetchRef || ""}" ]; then
+          echo "• Fetching remote branch..." &&
+          git fetch origin &&
+          if git show-ref --verify --quiet refs/heads/"${branchName}"; then
+            git checkout "${branchName}" &&
+            git pull origin "${branchName}" &&
+            echo "✓ Switched to existing remote branch: ${branchName}"
+          else
+            git checkout -b "${branchName}" "${remoteFetchRef}" &&
+            echo "✓ Created local branch from remote: ${branchName}"
+          fi
         else
-          git checkout -b "${branchName}" &&
-          echo "✓ Created new branch: ${branchName}"
+          # Regular branch creation
+          if git show-ref --verify --quiet refs/heads/"${branchName}"; then
+            git checkout "${branchName}" &&
+            echo "✓ Switched to existing branch: ${branchName}"
+          else
+            git checkout -b "${branchName}" &&
+            echo "✓ Created new branch: ${branchName}"
+          fi
         fi &&
         cat > /home/claude/start-session.sh << 'EOF'
 ${startupScript}
@@ -947,7 +1007,11 @@ EOF
       setupStream.on("end", () => {
         if (
           (output.includes("✓ Created new branch") ||
-            output.includes("✓ Switched to existing branch")) &&
+            output.includes("✓ Switched to existing branch") ||
+            output.includes("✓ Switched to existing remote branch") ||
+            output.includes("✓ Switched to existing PR branch") ||
+            output.includes("✓ Checked out PR branch") ||
+            output.includes("✓ Created local branch from remote")) &&
           output.includes("✓ Startup script created")
         ) {
           resolve();

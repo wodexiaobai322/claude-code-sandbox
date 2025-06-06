@@ -38,17 +38,90 @@ export class ClaudeSandbox {
       const currentBranch = await this.git.branchLocal();
       console.log(chalk.blue(`Current branch: ${currentBranch.current}`));
 
-      // Use target branch from config or generate one
-      const branchName =
-        this.config.targetBranch ||
-        (() => {
-          const timestamp = new Date()
-            .toISOString()
-            .replace(/[:.]/g, "-")
-            .split("T")[0];
-          return `claude/${timestamp}-${Date.now()}`;
-        })();
-      console.log(chalk.blue(`Will create branch in container: ${branchName}`));
+      // Determine target branch based on config options (but don't checkout in host repo)
+      let branchName = "";
+      let prFetchRef = "";
+      let remoteFetchRef = "";
+
+      if (this.config.prNumber) {
+        // Get PR branch name from GitHub but don't checkout locally
+        console.log(chalk.blue(`Getting PR #${this.config.prNumber} info...`));
+        try {
+          const { execSync } = require("child_process");
+
+          // Get PR info to find the actual branch name
+          const prInfo = execSync(
+            `gh pr view ${this.config.prNumber} --json headRefName`,
+            {
+              encoding: "utf-8",
+              cwd: process.cwd(),
+            },
+          );
+          const prData = JSON.parse(prInfo);
+          branchName = prData.headRefName;
+          prFetchRef = `pull/${this.config.prNumber}/head:${branchName}`;
+
+          console.log(
+            chalk.blue(
+              `PR #${this.config.prNumber} uses branch: ${branchName}`,
+            ),
+          );
+          console.log(
+            chalk.blue(`Will setup container with PR branch: ${branchName}`),
+          );
+        } catch (error) {
+          console.error(
+            chalk.red(`✗ Failed to get PR #${this.config.prNumber} info:`),
+            error,
+          );
+          throw error;
+        }
+      } else if (this.config.remoteBranch) {
+        // Parse remote branch but don't checkout locally
+        console.log(
+          chalk.blue(
+            `Will setup container with remote branch: ${this.config.remoteBranch}`,
+          ),
+        );
+        try {
+          // Parse remote/branch format
+          const parts = this.config.remoteBranch.split("/");
+          if (parts.length < 2) {
+            throw new Error(
+              'Remote branch must be in format "remote/branch" (e.g., "origin/feature-branch")',
+            );
+          }
+
+          const remote = parts[0];
+          const branch = parts.slice(1).join("/");
+
+          console.log(chalk.blue(`Remote: ${remote}, Branch: ${branch}`));
+          branchName = branch;
+          remoteFetchRef = `${remote}/${branch}`;
+        } catch (error) {
+          console.error(
+            chalk.red(
+              `✗ Failed to parse remote branch ${this.config.remoteBranch}:`,
+            ),
+            error,
+          );
+          throw error;
+        }
+      } else {
+        // Use target branch from config or generate one
+        branchName =
+          this.config.targetBranch ||
+          (() => {
+            const timestamp = new Date()
+              .toISOString()
+              .replace(/[:.]/g, "-")
+              .split("T")[0];
+            return `claude/${timestamp}-${Date.now()}`;
+          })();
+        console.log(
+          chalk.blue(`Will create branch in container: ${branchName}`),
+        );
+      }
 
       // Discover credentials (optional - don't fail if not found)
       const credentials = await this.credentialManager.discover();
@@ -57,6 +130,8 @@ export class ClaudeSandbox {
       const containerConfig = await this.prepareContainer(
         branchName,
         credentials,
+        prFetchRef,
+        remoteFetchRef,
       );
 
       // Start container
@@ -110,6 +185,8 @@ export class ClaudeSandbox {
   private async prepareContainer(
     branchName: string,
     credentials: any,
+    prFetchRef?: string,
+    remoteFetchRef?: string,
   ): Promise<any> {
     const workDir = process.cwd();
     const repoName = path.basename(workDir);
@@ -120,6 +197,8 @@ export class ClaudeSandbox {
       workDir,
       repoName,
       dockerImage: this.config.dockerImage || "claude-sandbox:latest",
+      prFetchRef,
+      remoteFetchRef,
     };
   }
 
