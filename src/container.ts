@@ -271,7 +271,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
   }
 
   private prepareEnvironment(credentials: Credentials): string[] {
-    const env = [];
+    const env: string[] = [];
 
     // Load environment variables from .env file if specified
     if (this.config.envFile) {
@@ -400,13 +400,26 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       env.push(`BASH_MAX_TIMEOUT_MS=${this.config.bashTimeout}`);
     }
 
+    // Fix localhost URLs for container environment
+    env.forEach((envVar, index) => {
+      if (envVar.includes("ANTHROPIC_BASE_URL=http://127.0.0.1") || envVar.includes("ANTHROPIC_BASE_URL=http://localhost")) {
+        env[index] = envVar.replace(/http:\/\/(127\.0\.0\.1|localhost)/, "http://host.docker.internal");
+        console.log(chalk.blue(`• Fixed API URL for container: ${env[index]}`));
+      }
+    });
+
     // Add custom environment variables
     if (this.config.environment) {
+      console.log(chalk.blue("• Loading custom environment variables:"));
       Object.entries(this.config.environment).forEach(([key, value]) => {
+        console.log(chalk.green(`  ${key}=${value}`));
         env.push(`${key}=${value}`);
       });
+    } else {
+      console.log(chalk.yellow("• No custom environment variables found in config"));
     }
 
+    console.log(chalk.blue(`• Total environment variables: ${env.length}`));
     return env;
   }
 
