@@ -139,6 +139,9 @@ export class CredentialManager {
     } else {
       // Try to get from gh CLI
       try {
+        // First check if gh command is available
+        execSync("which gh", { stdio: "ignore" });
+        
         const token = execSync("gh auth token 2>/dev/null", {
           encoding: "utf-8",
         }).trim();

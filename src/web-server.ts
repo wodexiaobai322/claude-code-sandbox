@@ -128,6 +128,12 @@ export class WebUIServer {
         // Get PR info using GitHub CLI (always use original repo)
         let prs = [];
         try {
+          // First check if gh command is available
+          await execAsync("which gh", {
+            cwd: this.originalRepo || process.cwd(),
+          });
+          
+          // If gh is available, try to get PR info
           const prResult = await execAsync(
             `gh pr list --head "${currentBranch}" --json number,title,state,url,isDraft,mergeable`,
             {
@@ -137,7 +143,8 @@ export class WebUIServer {
           prs = JSON.parse(prResult.stdout || "[]");
         } catch (error) {
           // GitHub CLI might not be installed or not authenticated
-          console.warn("Could not fetch PR info:", error);
+          // This is expected behavior when gh is not available
+          console.log("GitHub CLI not available, skipping PR info fetch");
         }
 
         const branchUrl = repoUrl ? `${repoUrl}/tree/${currentBranch}` : "";

@@ -57,6 +57,13 @@ export class ClaudeSandbox {
         try {
           const { execSync } = require("child_process");
 
+          // Check if gh command is available
+          try {
+            execSync("which gh", { stdio: "ignore" });
+          } catch {
+            throw new Error("GitHub CLI (gh) is not installed or not available in PATH");
+          }
+
           // Get PR info to find the actual branch name
           const prInfo = execSync(
             `gh pr view ${this.config.prNumber} --json headRefName`,
@@ -249,6 +256,13 @@ export class ClaudeSandbox {
     // Use gh CLI to create PR
     const { execSync } = require("child_process");
     try {
+      // Check if gh command is available
+      try {
+        execSync("which gh", { stdio: "ignore" });
+      } catch {
+        throw new Error("GitHub CLI (gh) is not installed or not available in PATH");
+      }
+
       execSync("gh pr create --fill", { stdio: "inherit" });
       console.log(chalk.green("✓ Created pull request"));
     } catch (error) {

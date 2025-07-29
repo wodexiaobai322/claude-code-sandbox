@@ -255,7 +255,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       HostConfig: {
         Binds: volumes,
         AutoRemove: false,
-        NetworkMode: "bridge",
+        NetworkMode: process.platform === "linux" ? "host" : "bridge",
       },
       WorkingDir: "/workspace",
       Cmd: ["/bin/bash", "-l"],
@@ -401,12 +401,16 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     }
 
     // Fix localhost URLs for container environment
-    env.forEach((envVar, index) => {
-      if (envVar.includes("ANTHROPIC_BASE_URL=http://127.0.0.1") || envVar.includes("ANTHROPIC_BASE_URL=http://localhost")) {
-        env[index] = envVar.replace(/http:\/\/(127\.0\.0\.1|localhost)/, "http://host.docker.internal");
-        console.log(chalk.blue(`• Fixed API URL for container: ${env[index]}`));
-      }
-    });
+    if (process.platform !== "linux") {
+      env.forEach((envVar, index) => {
+        if (envVar.includes("ANTHROPIC_BASE_URL=http://127.0.0.1") || envVar.includes("ANTHROPIC_BASE_URL=http://localhost")) {
+          env[index] = envVar.replace(/http:\/\/(127\.0\.0\.1|localhost)/, "http://host.docker.internal");
+          console.log(chalk.blue(`• Fixed API URL for container: ${env[index]}`));
+        }
+      });
+    } else {
+      console.log(chalk.blue("• Using host network mode on Linux - localhost URLs will work directly"));
+    }
 
     // Add custom environment variables
     if (this.config.environment) {
