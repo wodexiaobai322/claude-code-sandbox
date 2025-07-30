@@ -24,14 +24,28 @@ Access Claude through a **browser-based terminal** that lets you monitor and int
 
 ## Overview
 
-Claude Code Sandbox allows you to run Claude Code in isolated Docker containers, providing a safe environment for AI-assisted development. It automatically:
+Claude Code Sandbox allows you to run Claude Code in isolated Docker containers, providing a safe environment for AI-assisted development. It supports both **interactive** and **non-interactive** modes:
 
+### Interactive Mode (Web UI & Terminal)
 - Creates a new git branch for each session
 - Monitors for commits made by Claude
 - Provides interactive review of changes
-- Handles credential forwarding securely
+- Web UI with browser-based terminal interface
+- Direct terminal attach with `--no-web` option
+- Real-time file synchronization and git integration
+
+### Non-Interactive Mode (Exec Command)
+- Execute Claude commands programmatically via `exec` command
+- Stream output in real-time (text, JSON, or streaming JSON)
+- Full Claude Code parameter support (models, permissions, tools)
+- Perfect for automation, CI/CD, and API integration
+
+### Core Features
+- Handles credential forwarding securely (Claude API, GitHub, SSH)
 - Enables push/PR creation workflows
 - Runs custom setup commands for environment initialization
+- Supports Docker and Podman containers
+- Multiple container management with interactive selection
 
 ## Installation
 
@@ -52,6 +66,8 @@ npm install -g @textcortex/claude-code-sandbox
 
 ### Quick Start
 
+#### Interactive Mode (Recommended)
+
 Simply run in any git repository:
 
 ```bash
@@ -59,11 +75,26 @@ claude-sandbox
 ```
 
 This will:
-
 1. Create a new branch (`claude/[timestamp]`)
 2. Start a Docker container with Claude Code
 3. Launch a web UI at `http://localhost:3456`
 4. Open your browser automatically
+
+#### Terminal-Only Mode
+
+For direct terminal access without web UI:
+
+```bash
+claude-sandbox start --no-web
+```
+
+#### Non-Interactive Mode
+
+For automation and scripting:
+
+```bash
+claude-sandbox exec "Write a Python function to calculate factorial"
+```
 
 ### Commands
 
@@ -83,11 +114,16 @@ Explicitly start a new container with options:
 claude-sandbox start [options]
 
 Options:
-  -c, --config <path>    Configuration file (default: ./claude-sandbox.config.json)
-  -n, --name <name>      Container name prefix
-  --no-web               Disable web UI (use terminal attach)
-  --no-push              Disable automatic branch pushing
-  --no-pr                Disable automatic PR creation
+  -c, --config <path>       Configuration file (default: ./claude-sandbox.config.json)
+  -n, --name <name>         Container name prefix
+  --no-web                  Disable web UI (use terminal attach)
+  --no-push                 Disable automatic branch pushing
+  --no-create-pr            Disable automatic PR creation
+  --include-untracked       Include untracked files when copying to container
+  -b, --branch <branch>     Switch to specific branch on container start
+  --remote-branch <branch>  Checkout a remote branch (e.g., origin/feature-branch)
+  --pr <number>             Checkout a specific PR by number
+  --shell <shell>           Start with 'claude' or 'bash' shell
 ```
 
 #### `claude-sandbox attach [container-id]`
@@ -95,14 +131,19 @@ Options:
 Attach to an existing container:
 
 ```bash
-# Interactive selection
+# Interactive selection (web UI)
 claude-sandbox attach
 
-# Specific container
+# Specific container (web UI)
 claude-sandbox attach abc123def456
+
+# Terminal-only mode
+claude-sandbox attach --no-web
+claude-sandbox attach abc123def456 --no-web --shell bash
 
 Options:
   --no-web               Use terminal attach instead of web UI
+  --shell <shell>        Shell to use when attaching (claude or bash, default: claude)
 ```
 
 #### `claude-sandbox list`
@@ -153,6 +194,46 @@ Remove stopped containers:
 claude-sandbox clean
 claude-sandbox clean --force  # Remove all containers
 ```
+
+#### `claude-sandbox exec [prompt...]`
+
+Execute a Claude command in container (non-interactive):
+
+```bash
+# Interactive container selection
+claude-sandbox exec "帮我写一个Python函数计算阶乘"
+
+# Specify container explicitly
+claude-sandbox exec --container a5603c6539ca "解释这段代码的作用"
+
+# Use streaming JSON output
+claude-sandbox exec --output-format stream-json --verbose "写一个React组件"
+
+# Specify model and other options
+claude-sandbox exec --container a5603c6539ca --model sonnet "重构这个函数"
+
+# Continue previous conversation
+claude-sandbox exec --container a5603c6539ca --continue "还有其他建议吗？"
+```
+
+**Key Options:**
+```
+  --container <id>             Container ID to execute command in
+  --output-format <format>     Output format: text, json, stream-json (default: text)
+  --model <model>              Model to use (e.g., sonnet, opus)
+  --permission-mode <mode>     Permission mode: acceptEdits, bypassPermissions, default, plan
+  --allowedTools <tools...>    Allowed tools list
+  --continue                   Continue the most recent conversation
+  --resume [sessionId]         Resume a conversation
+  --debug                      Enable debug mode
+  --verbose                    Enable verbose mode
+```
+
+**Use Cases:**
+- **Automation**: Integrate Claude into CI/CD pipelines and scripts
+- **Batch Processing**: Process multiple prompts programmatically
+- **API Integration**: Use as part of microservices and web applications
+- **Development Tools**: Include in IDEs and development workflows
 
 #### `claude-sandbox config`
 
