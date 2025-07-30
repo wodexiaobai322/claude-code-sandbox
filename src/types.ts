@@ -27,6 +27,7 @@ export interface SandboxConfig {
   prNumber?: string;
   dockerSocketPath?: string;
   webUI?: boolean;
+  noGit?: boolean; // Disable git functionality
 }
 
 export interface Credentials {

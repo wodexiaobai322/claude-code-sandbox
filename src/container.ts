@@ -28,14 +28,22 @@ export class ContainerManager {
     // Copy working directory into container
     console.log(chalk.blue("• Copying files into container..."));
     try {
-      await this._copyWorkingDirectory(container, containerConfig.workDir);
+      await this._copyWorkingDirectory(
+        container, 
+        containerConfig.workDir,
+        containerConfig.gitStatus
+      );
       console.log(chalk.green("✓ Files copied"));
 
       // Copy Claude configuration if it exists
       await this._copyClaudeConfig(container);
 
-      // Copy git configuration if it exists
-      await this._copyGitConfig(container);
+      // Copy git configuration if it exists (only in git mode)
+      if (containerConfig.gitStatus?.isGitRepo) {
+        await this._copyGitConfig(container);
+      } else {
+        console.log(chalk.yellow("• Skipping git config copy (non-git mode)"));
+      }
     } catch (error) {
       console.error(chalk.red("✗ File copy failed:"), error);
       // Clean up container on failure
@@ -49,13 +57,18 @@ export class ContainerManager {
     await new Promise((resolve) => setTimeout(resolve, 500));
     console.log(chalk.green("✓ Container ready"));
 
-    // Set up git branch and startup script
-    await this.setupGitAndStartupScript(
-      container,
-      containerConfig.branchName,
-      containerConfig.prFetchRef,
-      containerConfig.remoteFetchRef,
-    );
+    // Set up git branch and startup script (only in git mode)
+    if (containerConfig.gitStatus?.isGitRepo) {
+      await this.setupGitAndStartupScript(
+        container,
+        containerConfig.branchName,
+        containerConfig.prFetchRef,
+        containerConfig.remoteFetchRef,
+      );
+    } else {
+      // In non-git mode, just create the startup script without git setup
+      await this.setupStartupScriptOnly(container);
+    }
 
     // Run setup commands
     await this.runSetupCommands(container);
@@ -515,6 +528,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
   private async _copyWorkingDirectory(
     container: Docker.Container,
     workDir: string,
+    gitStatus?: { isGitRepo: boolean; currentBranch?: string },
   ): Promise<void> {
     const { execSync } = require("child_process");
     const fs = require("fs");
@@ -532,54 +546,126 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     };
 
     try {
-      // Get list of git-tracked files (including uncommitted changes)
-      const trackedFiles = execSync("git ls-files", {
-        cwd: workDir,
-        encoding: "utf-8",
-      })
-        .trim()
-        .split("\n")
-        .filter((f: string) => f);
+      let allFiles: string[] = [];
 
-      // Get list of untracked files that aren't ignored (only if includeUntracked is true)
-      let untrackedFiles: string[] = [];
-      if (this.config.includeUntracked) {
-        untrackedFiles = execSync("git ls-files --others --exclude-standard", {
+      if (gitStatus?.isGitRepo) {
+        // Git mode: use git commands to get file lists
+        console.log(chalk.blue("• Using git-based file discovery"));
+
+        // Get list of git-tracked files (including uncommitted changes)
+        const trackedFiles = execSync("git ls-files", {
           cwd: workDir,
           encoding: "utf-8",
         })
           .trim()
           .split("\n")
           .filter((f: string) => f);
-      }
 
-      // Combine all files
-      const allFiles = [...trackedFiles, ...untrackedFiles];
+        // Get list of untracked files that aren't ignored (only if includeUntracked is true)
+        let untrackedFiles: string[] = [];
+        if (this.config.includeUntracked) {
+          untrackedFiles = execSync("git ls-files --others --exclude-standard", {
+            cwd: workDir,
+            encoding: "utf-8",
+          })
+            .trim()
+            .split("\n")
+            .filter((f: string) => f);
+        }
+
+        // Combine all files
+        allFiles = [...trackedFiles, ...untrackedFiles];
+      } else {
+        // Non-git mode: use filesystem traversal
+        console.log(chalk.blue("• Using filesystem-based file discovery"));
+        allFiles = this.getAllFiles(workDir);
+      }
 
       console.log(chalk.blue(`• Copying ${allFiles.length} files...`));
 
-      // Create tar archive using git archive for tracked files + untracked files
+      // Create tar archive
       const tarFile = `/tmp/claude-sandbox-${Date.now()}.tar`;
 
-      // First create archive of tracked files using git archive
-      execSync(`git archive --format=tar -o "${tarFile}" HEAD`, {
-        cwd: workDir,
-        stdio: "pipe",
-      });
+      if (gitStatus?.isGitRepo) {
+        // Git mode: try git archive first, fallback to filesystem if it fails
+        try {
+          let untrackedFiles: string[] = [];
+          if (this.config.includeUntracked) {
+            untrackedFiles = execSync("git ls-files --others --exclude-standard", {
+              cwd: workDir,
+              encoding: "utf-8",
+            })
+              .trim()
+              .split("\n")
+              .filter((f: string) => f);
+          }
 
-      // Add untracked files if any
-      if (untrackedFiles.length > 0) {
-        // Create a file list for tar
-        const fileListPath = `/tmp/claude-sandbox-files-${Date.now()}.txt`;
-        fs.writeFileSync(fileListPath, untrackedFiles.join("\n"));
+          // First create archive of tracked files using git archive
+          execSync(`git archive --format=tar -o "${tarFile}" HEAD`, {
+            cwd: workDir,
+            stdio: "pipe",
+          });
 
-        // Append untracked files to the tar
-        execSync(`tar -rf "${tarFile}" --files-from="${fileListPath}"`, {
-          cwd: workDir,
-          stdio: "pipe",
-        });
+          // Add untracked files if any
+          if (untrackedFiles.length > 0) {
+            // Create a file list for tar
+            const fileListPath = `/tmp/claude-sandbox-files-${Date.now()}.txt`;
+            fs.writeFileSync(fileListPath, untrackedFiles.join("\n"));
 
-        fs.unlinkSync(fileListPath);
+            // Append untracked files to the tar
+            execSync(`tar -rf "${tarFile}" --files-from="${fileListPath}"`, {
+              cwd: workDir,
+              stdio: "pipe",
+            });
+
+            fs.unlinkSync(fileListPath);
+          }
+        } catch (gitError) {
+          // Git archive failed (e.g., no commits, untracked directory)
+          // Fall back to filesystem-based file discovery
+          console.log(chalk.yellow("• Git archive failed, falling back to filesystem discovery"));
+          allFiles = this.getAllFiles(workDir);
+          
+          // Create tar archive from file list
+          if (allFiles.length > 0) {
+            const fileListPath = `/tmp/claude-sandbox-files-${Date.now()}.txt`;
+            fs.writeFileSync(fileListPath, allFiles.join("\n"));
+
+            const tarFlags = getTarFlags();
+            execSync(`tar -cf "${tarFile}" ${tarFlags} --files-from="${fileListPath}"`, {
+              cwd: workDir,
+              stdio: "pipe",
+            });
+
+            fs.unlinkSync(fileListPath);
+          } else {
+            // Create empty tar if no files
+            execSync(`tar -cf "${tarFile}" --files-from=/dev/null`, {
+              cwd: workDir,
+              stdio: "pipe",
+            });
+          }
+        }
+      } else {
+        // Non-git mode: create tar archive from file list
+        if (allFiles.length > 0) {
+          const fileListPath = `/tmp/claude-sandbox-files-${Date.now()}.txt`;
+          fs.writeFileSync(fileListPath, allFiles.join("\n"));
+
+          const tarFlags = getTarFlags();
+          execSync(`tar -cf "${tarFile}" ${tarFlags} --files-from="${fileListPath}"`, {
+            cwd: workDir,
+            stdio: "pipe",
+          });
+
+          fs.unlinkSync(fileListPath);
+        } else {
+          // Create empty tar if no files
+          execSync(`tar -cf "${tarFile}" --files-from=/dev/null`, {
+            cwd: workDir,
+            stdio: "pipe",
+          });
+        }
       }
 
       // Read and copy the tar file in chunks to avoid memory issues
@@ -604,15 +690,90 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       // Clean up
       fs.unlinkSync(tarFile);
 
-      // Also copy .git directory to preserve git history
-      console.log(chalk.blue("• Copying git history..."));
-      const gitTarFile = `/tmp/claude-sandbox-git-${Date.now()}.tar`;
-      // Exclude macOS resource fork files and .DS_Store when creating git archive
-      // Also strip extended attributes to prevent macOS xattr issues in Docker
-      const tarFlags = getTarFlags();
-      // On macOS, also exclude extended attributes that cause Docker issues
-      const additionalFlags = (process.platform as string) === "darwin" ? "--no-xattrs --no-fflags" : "";
-      const combinedFlags = `${tarFlags} ${additionalFlags}`.trim();
+      // Copy .git directory only in git mode
+      if (gitStatus?.isGitRepo) {
+        console.log(chalk.blue("• Copying git history..."));
+        await this.copyGitHistory(container, workDir);
+      } else {
+        console.log(chalk.yellow("• Skipping git history copy (non-git mode)"));
+      }
+    } catch (error) {
+      console.error(chalk.red("✗ Failed to copy files:"), error);
+      throw error;
+    }
+  }
+
+  private getAllFiles(workDir: string): string[] {
+    const fs = require("fs");
+    const path = require("path");
+    
+    const files: string[] = [];
+    const ignoredDirs = new Set([
+      '.git', 'node_modules', '__pycache__', '.pytest_cache', 
+      'venv', '.venv', 'env', '.env', 'dist', 'build', 
+      '.DS_Store', 'thumbs.db', '.idea', '.vscode'
+    ]);
+    
+    const getAllFilesRecursive = (dir: string, relativePath: string = ''): void => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          const relativeFilePath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+          
+          if (entry.isDirectory()) {
+            if (!ignoredDirs.has(entry.name) && !entry.name.startsWith('.')) {
+              getAllFilesRecursive(fullPath, relativeFilePath);
+            }
+          } else if (entry.isFile()) {
+            // Skip hidden files and common ignored files
+            if (!entry.name.startsWith('.') && !entry.name.includes('~')) {
+              files.push(relativeFilePath);
+            }
+          }
+        }
+      } catch (error) {
+        // Skip directories we can't read
+        console.warn(`Warning: Could not read directory ${dir}: ${error}`);
+      }
+    };
+    
+    getAllFilesRecursive(workDir);
+    return files;
+  }
+
+  private async copyGitHistory(container: Docker.Container, workDir: string): Promise<void> {
+    const { execSync } = require("child_process");
+    const fs = require("fs");
+    
+    // Check if .git directory exists first
+    if (!fs.existsSync(`${workDir}/.git`)) {
+      console.log(chalk.yellow("• No .git directory found, skipping git history copy"));
+      return;
+    }
+    
+    // Helper function to get tar flags safely
+    const getTarFlags = () => {
+      try {
+        // Test if --no-xattrs is supported by checking tar help
+        execSync("tar --help 2>&1 | grep -q no-xattrs", { stdio: "pipe" });
+        return "--no-xattrs";
+      } catch {
+        // --no-xattrs not supported, use standard tar
+        return "";
+      }
+    };
+
+    const gitTarFile = `/tmp/claude-sandbox-git-${Date.now()}.tar`;
+    // Exclude macOS resource fork files and .DS_Store when creating git archive
+    // Also strip extended attributes to prevent macOS xattr issues in Docker
+    const tarFlags = getTarFlags();
+    // On macOS, also exclude extended attributes that cause Docker issues
+    const additionalFlags = (process.platform as string) === "darwin" ? "--no-xattrs --no-fflags" : "";
+    const combinedFlags = `${tarFlags} ${additionalFlags}`.trim();
+    
+    try {
       execSync(
         `tar -cf "${gitTarFile}" --exclude="._*" --exclude=".DS_Store" ${combinedFlags} .git`,
         {
@@ -621,30 +782,76 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
         },
       );
 
-      try {
-        const gitStream = fs.createReadStream(gitTarFile);
+      const gitStream = fs.createReadStream(gitTarFile);
 
-        // Upload git archive
-        await container.putArchive(gitStream, {
-          path: "/workspace",
-        });
+      // Upload git archive
+      await container.putArchive(gitStream, {
+        path: "/workspace",
+      });
 
-        // Clean up
-        fs.unlinkSync(gitTarFile);
-      } catch (error) {
-        console.error(chalk.red("✗ Git history copy failed:"), error);
-        // Clean up the tar file even if upload failed
-        try {
-          fs.unlinkSync(gitTarFile);
-        } catch (e) {
-          // Ignore cleanup errors
-        }
-        throw error;
-      }
+      // Clean up
+      fs.unlinkSync(gitTarFile);
     } catch (error) {
-      console.error(chalk.red("✗ Failed to copy files:"), error);
+      console.error(chalk.red("✗ Git history copy failed:"), error);
+      // Clean up the tar file even if upload failed
+      try {
+        fs.unlinkSync(gitTarFile);
+      } catch (e) {
+        // Ignore cleanup errors
+      }
       throw error;
     }
+  }
+
+  private async setupStartupScriptOnly(container: Docker.Container): Promise<void> {
+    console.log(chalk.blue("• Setting up startup script (non-git mode)..."));
+
+    // Create startup script for non-git mode
+    const startupScript = `#!/bin/bash
+cd /workspace
+
+# Make sure we're in a basic git repository for Claude (create minimal git setup)
+if [ ! -d ".git" ]; then
+  git init
+  git config user.name "Claude"
+  git config user.email "claude@anthropic.com"
+  
+  # Create initial commit if there are files
+  if [ "$(ls -A . 2>/dev/null)" ]; then
+    git add .
+    git commit -m "Initial commit" --allow-empty
+  fi
+fi
+
+# Start Claude Code with configured options
+exec claude --dangerously-skip-permissions
+`;
+
+    // Write startup script to container
+    const exec = await container.exec({
+      Cmd: [
+        "bash",
+        "-c",
+        `cat > /home/claude/start-session.sh << 'EOF'
+${startupScript}
+EOF`,
+      ],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+
+    await exec.start({ hijack: false });
+
+    // Make script executable
+    const chmodExec = await container.exec({
+      Cmd: ["chmod", "+x", "/home/claude/start-session.sh"],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+
+    await chmodExec.start({ hijack: false });
+    
+    console.log(chalk.green("✓ Startup script created"));
   }
 
   private async _copyClaudeConfig(container: Docker.Container): Promise<void> {

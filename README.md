@@ -59,7 +59,7 @@ npm install -g @textcortex/claude-code-sandbox
 
 - Node.js >= 18.0.0
 - Docker or Podman
-- Git
+- Git (optional - for git integration features)
 - Claude Code (`npm install -g @anthropic-ai/claude-code@latest`)
 
 ## Usage
@@ -68,17 +68,24 @@ npm install -g @textcortex/claude-code-sandbox
 
 #### Interactive Mode (Recommended)
 
-Simply run in any git repository:
+Simply run in any directory (git or non-git):
 
 ```bash
 claude-sandbox
 ```
 
-This will:
+**In a git repository**, this will:
 1. Create a new branch (`claude/[timestamp]`)
 2. Start a Docker container with Claude Code
 3. Launch a web UI at `http://localhost:3456`
 4. Open your browser automatically
+5. Monitor for commits and provide review options
+
+**In a non-git directory**, this will:
+1. Start a Docker container with Claude Code
+2. Launch a web UI at `http://localhost:3456`
+3. Open your browser automatically
+4. Run without git integration (no commit monitoring)
 
 #### Terminal-Only Mode
 
@@ -119,6 +126,7 @@ Options:
   --no-web                  Disable web UI (use terminal attach)
   --no-push                 Disable automatic branch pushing
   --no-create-pr            Disable automatic PR creation
+  --no-git                  Disable git functionality (for non-git directories)
   --include-untracked       Include untracked files when copying to container
   -b, --branch <branch>     Switch to specific branch on container start
   --remote-branch <branch>  Checkout a remote branch (e.g., origin/feature-branch)
@@ -255,6 +263,7 @@ Create a `claude-sandbox.config.json` file (see `claude-sandbox.config.example.j
   "autoPush": true,
   "autoCreatePR": true,
   "autoStartClaude": true,
+  "noGit": false,
   "envFile": ".env",
   "environment": {
     "NODE_ENV": "development"
@@ -286,9 +295,10 @@ Create a `claude-sandbox.config.json` file (see `claude-sandbox.config.example.j
 - `dockerImage`: Base Docker image to use (default: `claude-code-sandbox:latest`)
 - `dockerfile`: Path to custom Dockerfile (optional)
 - `detached`: Run container in detached mode
-- `autoPush`: Automatically push branches after commits
-- `autoCreatePR`: Automatically create pull requests
+- `autoPush`: Automatically push branches after commits (auto-disabled in non-git environments)
+- `autoCreatePR`: Automatically create pull requests (auto-disabled in non-git environments)
 - `autoStartClaude`: Start Claude Code automatically (default: true)
+- `noGit`: Disable git functionality even in git repositories (default: false)
 - `envFile`: Load environment variables from file (e.g., `.env`)
 - `environment`: Additional environment variables
 - `setupCommands`: Commands to run after container starts (e.g., install dependencies)
@@ -317,6 +327,42 @@ Example use cases:
 - Access host system resources (use with caution)
 
 ## Features
+
+### Non-Git Directory Support
+
+Claude Code Sandbox now works seamlessly in both git and non-git environments:
+
+**Intelligent Detection:**
+- Automatically detects if the current directory is a git repository
+- Gracefully handles non-git directories without errors
+- No manual configuration required in most cases
+
+**Automatic Feature Adjustment:**
+- Git-related features (`autoPush`, `autoCreatePR`, commit monitoring) are automatically disabled in non-git environments
+- Uses simple workspace names (e.g., "claude-session") instead of git-based branch names
+- All other functionality remains fully available
+
+**Manual Control:**
+- Use `--no-git` flag to explicitly disable git functionality even in git repositories
+- Set `"noGit": true` in configuration file for persistent non-git mode
+- Useful for testing or when you want to avoid git operations
+
+**Examples:**
+```bash
+# Works in any directory - auto-detects environment
+claude-sandbox
+
+# Explicitly disable git functionality
+claude-sandbox --no-git
+claude-sandbox start --no-git
+
+# Configuration file approach
+{
+  "noGit": true,
+  "autoPush": false,
+  "autoCreatePR": false
+}
+```
 
 ### Podman Support
 

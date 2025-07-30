@@ -13,6 +13,7 @@ const DEFAULT_CONFIG: SandboxConfig = {
   setupCommands: [], // Example: ["npm install", "pip install -r requirements.txt"]
   allowedTools: ["*"], // All tools allowed in sandbox
   includeUntracked: false, // Don't include untracked files by default
+  noGit: false, // Enable git functionality by default
   // maxThinkingTokens: 100000,
   // bashTimeout: 600000, // 10 minutes
 };

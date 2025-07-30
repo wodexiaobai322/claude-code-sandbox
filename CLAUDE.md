@@ -23,6 +23,27 @@ This is the Claude Code Sandbox project - a CLI tool that runs Claude Code insta
 
 - `npm run purge-containers` - Remove all Claude Sandbox containers and images
 
+### Running in Non-Git Directories
+
+The tool now supports running in directories without git repositories:
+
+- **Automatic detection**: The tool automatically detects if the current directory is a git repository
+- **Auto-disable features**: When not in a git repo, git-related features (autoPush, autoCreatePR, git monitoring) are automatically disabled
+- **Manual override**: Use `--no-git` flag to explicitly disable git functionality even in git repositories
+- **Fallback naming**: In non-git mode, containers use simple branch names like "claude-session" instead of git-based names
+
+Examples:
+```bash
+# Auto-detects non-git environment and runs without git features
+claude-sandbox
+
+# Explicitly disable git functionality
+claude-sandbox --no-git
+
+# Start command also supports non-git mode
+claude-sandbox start --no-git
+```
+
 ## Architecture
 
 ### Core Components
@@ -88,7 +109,8 @@ The tool looks for `claude-sandbox.config.json` in the working directory. Key op
 - `environment`: Additional environment variables
 - `volumes`: Additional volume mounts
 - `allowedTools`: Claude tool permissions (default: all)
-- `autoPush`/`autoCreatePR`: Git workflow settings
+- `autoPush`/`autoCreatePR`: Git workflow settings (automatically disabled in non-git environments)
+- `noGit`: Disable git functionality even in git repositories
 
 ## Development Workflow
 

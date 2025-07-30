@@ -39,103 +39,123 @@ export class ClaudeSandbox {
 
   async run(): Promise<void> {
     try {
-      // Verify we're in a git repository
-      await this.verifyGitRepo();
-
-      // Check current branch
-      const currentBranch = await this.git.branchLocal();
-      console.log(chalk.blue(`Current branch: ${currentBranch.current}`));
-
+      // Check git repository status
+      const gitStatus = await this.checkGitStatus();
+      
+      // Auto-adjust config for non-git environments
+      if (!gitStatus.isGitRepo) {
+        // Automatically disable git-related features in non-git environments
+        this.config.autoPush = false;
+        this.config.autoCreatePR = false;
+        console.log(
+          chalk.yellow("⚠️ Auto-disabled git features (autoPush, autoCreatePR) for non-git environment"),
+        );
+      }
+      
       // Determine target branch based on config options (but don't checkout in host repo)
       let branchName = "";
       let prFetchRef = "";
       let remoteFetchRef = "";
 
-      if (this.config.prNumber) {
-        // Get PR branch name from GitHub but don't checkout locally
-        console.log(chalk.blue(`Getting PR #${this.config.prNumber} info...`));
-        try {
-          const { execSync } = require("child_process");
+      if (!gitStatus.isGitRepo) {
+        // Non-git environment: use a simple branch name
+        branchName = this.config.targetBranch || "claude-session";
+        console.log(
+          chalk.yellow(`⚠️ Not a git repository. Running in non-git mode.`),
+        );
+        console.log(
+          chalk.blue(`Will create workspace with branch name: ${branchName}`),
+        );
+      } else {
+        // Git environment: handle git-specific options
+        console.log(chalk.blue(`Current branch: ${gitStatus.currentBranch}`));
 
-          // Check if gh command is available
+        if (this.config.prNumber) {
+          // Get PR branch name from GitHub but don't checkout locally
+          console.log(chalk.blue(`Getting PR #${this.config.prNumber} info...`));
           try {
-            execSync("which gh", { stdio: "ignore" });
-          } catch {
-            throw new Error("GitHub CLI (gh) is not installed or not available in PATH");
+            const { execSync } = require("child_process");
+
+            // Check if gh command is available
+            try {
+              execSync("which gh", { stdio: "ignore" });
+            } catch {
+              throw new Error("GitHub CLI (gh) is not installed or not available in PATH");
+            }
+
+            // Get PR info to find the actual branch name
+            const prInfo = execSync(
+              `gh pr view ${this.config.prNumber} --json headRefName`,
+              {
+                encoding: "utf-8",
+                cwd: process.cwd(),
+              },
+            );
+            const prData = JSON.parse(prInfo);
+            branchName = prData.headRefName;
+            prFetchRef = `pull/${this.config.prNumber}/head:${branchName}`;
+
+            console.log(
+              chalk.blue(
+                `PR #${this.config.prNumber} uses branch: ${branchName}`,
+              ),
+            );
+            console.log(
+              chalk.blue(`Will setup container with PR branch: ${branchName}`),
+            );
+          } catch (error) {
+            console.error(
+              chalk.red(`✗ Failed to get PR #${this.config.prNumber} info:`),
+              error,
+            );
+            throw error;
           }
-
-          // Get PR info to find the actual branch name
-          const prInfo = execSync(
-            `gh pr view ${this.config.prNumber} --json headRefName`,
-            {
-              encoding: "utf-8",
-              cwd: process.cwd(),
-            },
-          );
-          const prData = JSON.parse(prInfo);
-          branchName = prData.headRefName;
-          prFetchRef = `pull/${this.config.prNumber}/head:${branchName}`;
-
+        } else if (this.config.remoteBranch) {
+          // Parse remote branch but don't checkout locally
           console.log(
             chalk.blue(
-              `PR #${this.config.prNumber} uses branch: ${branchName}`,
+              `Will setup container with remote branch: ${this.config.remoteBranch}`,
             ),
           );
-          console.log(
-            chalk.blue(`Will setup container with PR branch: ${branchName}`),
-          );
-        } catch (error) {
-          console.error(
-            chalk.red(`✗ Failed to get PR #${this.config.prNumber} info:`),
-            error,
-          );
-          throw error;
-        }
-      } else if (this.config.remoteBranch) {
-        // Parse remote branch but don't checkout locally
-        console.log(
-          chalk.blue(
-            `Will setup container with remote branch: ${this.config.remoteBranch}`,
-          ),
-        );
-        try {
-          // Parse remote/branch format
-          const parts = this.config.remoteBranch.split("/");
-          if (parts.length < 2) {
-            throw new Error(
-              'Remote branch must be in format "remote/branch" (e.g., "origin/feature-branch")',
+          try {
+            // Parse remote/branch format
+            const parts = this.config.remoteBranch.split("/");
+            if (parts.length < 2) {
+              throw new Error(
+                'Remote branch must be in format "remote/branch" (e.g., "origin/feature-branch")',
+              );
+            }
+
+            const remote = parts[0];
+            const branch = parts.slice(1).join("/");
+
+            console.log(chalk.blue(`Remote: ${remote}, Branch: ${branch}`));
+            branchName = branch;
+            remoteFetchRef = `${remote}/${branch}`;
+          } catch (error) {
+            console.error(
+              chalk.red(
+                `✗ Failed to parse remote branch ${this.config.remoteBranch}:`,
+              ),
+              error,
             );
+            throw error;
           }
-
-          const remote = parts[0];
-          const branch = parts.slice(1).join("/");
-
-          console.log(chalk.blue(`Remote: ${remote}, Branch: ${branch}`));
-          branchName = branch;
-          remoteFetchRef = `${remote}/${branch}`;
-        } catch (error) {
-          console.error(
-            chalk.red(
-              `✗ Failed to parse remote branch ${this.config.remoteBranch}:`,
-            ),
-            error,
+        } else {
+          // Use target branch from config or generate one
+          branchName =
+            this.config.targetBranch ||
+            (() => {
+              const timestamp = new Date()
+                .toISOString()
+                .replace(/[:.]/g, "-")
+                .split("T")[0];
+              return `claude/${timestamp}-${Date.now()}`;
+            })();
+          console.log(
+            chalk.blue(`Will create branch in container: ${branchName}`),
           );
-          throw error;
         }
-      } else {
-        // Use target branch from config or generate one
-        branchName =
-          this.config.targetBranch ||
-          (() => {
-            const timestamp = new Date()
-              .toISOString()
-              .replace(/[:.]/g, "-")
-              .split("T")[0];
-            return `claude/${timestamp}-${Date.now()}`;
-          })();
-        console.log(
-          chalk.blue(`Will create branch in container: ${branchName}`),
-        );
       }
 
       // Discover credentials (optional - don't fail if not found)
@@ -147,6 +167,7 @@ export class ClaudeSandbox {
         credentials,
         prFetchRef,
         remoteFetchRef,
+        gitStatus,
       );
 
       // Start container
@@ -155,13 +176,17 @@ export class ClaudeSandbox {
         chalk.green(`✓ Started container: ${containerId.substring(0, 12)}`),
       );
 
-      // Start monitoring for commits
-      this.gitMonitor.on("commit", async (commit) => {
-        await this.handleCommit(commit);
-      });
+      // Start monitoring for commits only if in git mode
+      if (gitStatus.isGitRepo && !this.config.noGit) {
+        this.gitMonitor.on("commit", async (commit) => {
+          await this.handleCommit(commit);
+        });
 
-      await this.gitMonitor.start(branchName);
-      console.log(chalk.blue("✓ Git monitoring started"));
+        await this.gitMonitor.start(branchName);
+        console.log(chalk.blue("✓ Git monitoring started"));
+      } else {
+        console.log(chalk.yellow("⚠️ Git monitoring disabled (non-git mode)"));
+      }
 
       // Always launch web UI
       this.webServer = new WebUIServer(this.docker);
@@ -188,12 +213,46 @@ export class ClaudeSandbox {
     }
   }
 
-  private async verifyGitRepo(): Promise<void> {
-    const isRepo = await this.git.checkIsRepo();
-    if (!isRepo) {
-      throw new Error(
-        "Not a git repository. Please run claude-sandbox from within a git repository.",
-      );
+  private async checkGitStatus(): Promise<{
+    isGitRepo: boolean;
+    currentBranch?: string;
+  }> {
+    try {
+      // If --no-git flag is set, always return non-git status
+      if (this.config.noGit) {
+        console.log(chalk.yellow("⚠️ Git functionality disabled by --no-git flag"));
+        return { isGitRepo: false };
+      }
+
+      // Check if current working directory is a git working tree
+      const { exec } = require("child_process");
+      const { promisify } = require("util");
+      const execAsync = promisify(exec);
+      
+      try {
+        // Check if current directory is in a git working tree and has .git
+        await execAsync("git rev-parse --is-inside-work-tree", { 
+          cwd: process.cwd() 
+        });
+        
+        // Also check if .git directory exists in current directory or its parents
+        await execAsync("git rev-parse --git-dir", { 
+          cwd: process.cwd() 
+        });
+        
+        // If we get here, we're in a valid git working tree
+        const currentBranch = await this.git.branchLocal();
+        return {
+          isGitRepo: true,
+          currentBranch: currentBranch.current,
+        };
+      } catch (gitError) {
+        // Not in a git working tree or git commands failed
+        return { isGitRepo: false };
+      }
+    } catch (error) {
+      // If any operations fail, treat as non-git
+      return { isGitRepo: false };
     }
   }
 
@@ -202,6 +261,7 @@ export class ClaudeSandbox {
     credentials: any,
     prFetchRef?: string,
     remoteFetchRef?: string,
+    gitStatus?: { isGitRepo: boolean; currentBranch?: string },
   ): Promise<any> {
     const workDir = process.cwd();
     const repoName = path.basename(workDir);
@@ -214,6 +274,7 @@ export class ClaudeSandbox {
       dockerImage: this.config.dockerImage || "claude-sandbox:latest",
       prFetchRef,
       remoteFetchRef,
+      gitStatus, // Pass git status to container manager
     };
   }
 
@@ -276,96 +337,116 @@ export class ClaudeSandbox {
 
   async startContainer(): Promise<string> {
     try {
-      // Verify we're in a git repository
-      await this.verifyGitRepo();
+      // Check git repository status
+      const gitStatus = await this.checkGitStatus();
 
-      // Check current branch
-      const currentBranch = await this.git.branchLocal();
-      console.log(chalk.blue(`Current branch: ${currentBranch.current}`));
+      // Auto-adjust config for non-git environments
+      if (!gitStatus.isGitRepo) {
+        // Automatically disable git-related features in non-git environments
+        this.config.autoPush = false;
+        this.config.autoCreatePR = false;
+        console.log(
+          chalk.yellow("⚠️ Auto-disabled git features (autoPush, autoCreatePR) for non-git environment"),
+        );
+      }
 
       // Determine target branch based on config options
       let branchName = "";
       let prFetchRef = "";
       let remoteFetchRef = "";
 
-      if (this.config.prNumber) {
-        // Handle PR checkout (same logic as run())
-        console.log(chalk.blue(`Getting PR #${this.config.prNumber} info...`));
-        try {
-          const { execSync } = require("child_process");
+      if (!gitStatus.isGitRepo) {
+        // Non-git environment: use a simple branch name
+        branchName = this.config.targetBranch || "claude-session";
+        console.log(
+          chalk.yellow(`⚠️ Not a git repository. Running in non-git mode.`),
+        );
+        console.log(
+          chalk.blue(`Will create workspace with branch name: ${branchName}`),
+        );
+      } else {
+        // Git environment: handle git-specific options
+        console.log(chalk.blue(`Current branch: ${gitStatus.currentBranch}`));
+
+        if (this.config.prNumber) {
+          // Handle PR checkout (same logic as run())
+          console.log(chalk.blue(`Getting PR #${this.config.prNumber} info...`));
           try {
-            execSync("which gh", { stdio: "ignore" });
-          } catch {
-            throw new Error("GitHub CLI (gh) is not installed or not available in PATH");
+            const { execSync } = require("child_process");
+            try {
+              execSync("which gh", { stdio: "ignore" });
+            } catch {
+              throw new Error("GitHub CLI (gh) is not installed or not available in PATH");
+            }
+
+            const prInfo = execSync(
+              `gh pr view ${this.config.prNumber} --json headRefName`,
+              {
+                encoding: "utf-8",
+                cwd: process.cwd(),
+              },
+            );
+            const prData = JSON.parse(prInfo);
+            branchName = prData.headRefName;
+            prFetchRef = `pull/${this.config.prNumber}/head:${branchName}`;
+
+            console.log(
+              chalk.blue(
+                `PR #${this.config.prNumber} uses branch: ${branchName}`,
+              ),
+            );
+          } catch (error) {
+            console.error(
+              chalk.red(`✗ Failed to get PR #${this.config.prNumber} info:`),
+              error,
+            );
+            throw error;
           }
-
-          const prInfo = execSync(
-            `gh pr view ${this.config.prNumber} --json headRefName`,
-            {
-              encoding: "utf-8",
-              cwd: process.cwd(),
-            },
-          );
-          const prData = JSON.parse(prInfo);
-          branchName = prData.headRefName;
-          prFetchRef = `pull/${this.config.prNumber}/head:${branchName}`;
-
+        } else if (this.config.remoteBranch) {
+          // Handle remote branch checkout
           console.log(
             chalk.blue(
-              `PR #${this.config.prNumber} uses branch: ${branchName}`,
+              `Will setup container with remote branch: ${this.config.remoteBranch}`,
             ),
           );
-        } catch (error) {
-          console.error(
-            chalk.red(`✗ Failed to get PR #${this.config.prNumber} info:`),
-            error,
-          );
-          throw error;
-        }
-      } else if (this.config.remoteBranch) {
-        // Handle remote branch checkout
-        console.log(
-          chalk.blue(
-            `Will setup container with remote branch: ${this.config.remoteBranch}`,
-          ),
-        );
-        try {
-          const parts = this.config.remoteBranch.split("/");
-          if (parts.length < 2) {
-            throw new Error(
-              'Remote branch must be in format "remote/branch" (e.g., "origin/feature-branch")',
+          try {
+            const parts = this.config.remoteBranch.split("/");
+            if (parts.length < 2) {
+              throw new Error(
+                'Remote branch must be in format "remote/branch" (e.g., "origin/feature-branch")',
+              );
+            }
+
+            const remote = parts[0];
+            const branch = parts.slice(1).join("/");
+
+            console.log(chalk.blue(`Remote: ${remote}, Branch: ${branch}`));
+            branchName = branch;
+            remoteFetchRef = `${remote}/${branch}`;
+          } catch (error) {
+            console.error(
+              chalk.red(
+                `✗ Failed to parse remote branch ${this.config.remoteBranch}:`,
+              ),
+              error,
             );
+            throw error;
           }
-
-          const remote = parts[0];
-          const branch = parts.slice(1).join("/");
-
-          console.log(chalk.blue(`Remote: ${remote}, Branch: ${branch}`));
-          branchName = branch;
-          remoteFetchRef = `${remote}/${branch}`;
-        } catch (error) {
-          console.error(
-            chalk.red(
-              `✗ Failed to parse remote branch ${this.config.remoteBranch}:`,
-            ),
-            error,
+        } else {
+          // Use target branch from config or generate one
+          branchName =
+            this.config.targetBranch ||
+            (() => {
+              const timestamp = new Date()
+                .toISOString()
+                .replace(/[:.]/g, "-")
+                .split("T")[0];
+              return `claude/${timestamp}-${Date.now()}`;
+            })();
+          console.log(
+            chalk.blue(`Will create branch in container: ${branchName}`),
           );
-          throw error;
         }
-      } else {
-        // Use target branch from config or generate one
-        branchName =
-          this.config.targetBranch ||
-          (() => {
-            const timestamp = new Date()
-              .toISOString()
-              .replace(/[:.]/g, "-")
-              .split("T")[0];
-            return `claude/${timestamp}-${Date.now()}`;
-          })();
-        console.log(
-          chalk.blue(`Will create branch in container: ${branchName}`),
-        );
       }
 
       // Discover credentials
@@ -377,6 +458,7 @@ export class ClaudeSandbox {
         credentials,
         prFetchRef,
         remoteFetchRef,
+        gitStatus,
       );
 
       // Start container and return ID

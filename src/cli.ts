@@ -311,11 +311,13 @@ program
     "Start with 'claude' or 'bash' shell",
     /^(claude|bash)$/i,
   )
+  .option("--no-git", "Disable git functionality (for non-git directories)")
   .action(async (options) => {
     console.log(chalk.blue("🚀 Starting Claude Sandbox..."));
 
     const config = await loadConfig("./claude-sandbox.config.json");
     config.includeUntracked = false;
+    config.noGit = options.git === false; // Handle --no-git option
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
     }
@@ -337,6 +339,7 @@ program
   .option("--no-web", "Disable web UI (use terminal attach)")
   .option("--no-push", "Disable automatic branch pushing")
   .option("--no-create-pr", "Disable automatic PR creation")
+  .option("--no-git", "Disable git functionality (for non-git directories)")
   .option(
     "--include-untracked",
     "Include untracked files when copying to container",
@@ -367,6 +370,7 @@ program
     config.remoteBranch = options.remoteBranch;
     config.prNumber = options.pr;
     config.webUI = options.web !== false; // Add web UI control
+    config.noGit = options.git === false; // Handle --no-git option
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
     }
