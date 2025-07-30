@@ -311,13 +311,18 @@ program
     "Start with 'claude' or 'bash' shell",
     /^(claude|bash)$/i,
   )
+  .option("--git", "Enable git functionality (default)", true)
   .option("--no-git", "Disable git functionality (for non-git directories)")
   .action(async (options) => {
     console.log(chalk.blue("🚀 Starting Claude Sandbox..."));
 
+    // Check if --no-git was explicitly passed
+    const noGitExplicit = process.argv.includes('--no-git');
+
     const config = await loadConfig("./claude-sandbox.config.json");
     config.includeUntracked = false;
-    config.noGit = options.git === false; // Handle --no-git option
+    // Use explicit argv check for --no-git
+    config.noGit = noGitExplicit;
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
     }
@@ -339,6 +344,7 @@ program
   .option("--no-web", "Disable web UI (use terminal attach)")
   .option("--no-push", "Disable automatic branch pushing")
   .option("--no-create-pr", "Disable automatic PR creation")
+  .option("--git", "Enable git functionality (default)", true)
   .option("--no-git", "Disable git functionality (for non-git directories)")
   .option(
     "--include-untracked",
@@ -361,6 +367,9 @@ program
   .action(async (options) => {
     console.log(chalk.blue("🚀 Starting new Claude Sandbox container..."));
 
+    // Check if --no-git was explicitly passed
+    const noGitExplicit = process.argv.includes('--no-git');
+
     const config = await loadConfig(options.config);
     config.containerPrefix = options.name || config.containerPrefix;
     config.autoPush = options.push !== false;
@@ -370,7 +379,14 @@ program
     config.remoteBranch = options.remoteBranch;
     config.prNumber = options.pr;
     config.webUI = options.web !== false; // Add web UI control
-    config.noGit = options.git === false; // Handle --no-git option
+    
+    // Use explicit argv check for --no-git
+    config.noGit = noGitExplicit;
+    
+    if (config.noGit) {
+      console.log(chalk.yellow("⚠️ Git functionality disabled by --no-git flag"));
+    }
+    
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
     }
