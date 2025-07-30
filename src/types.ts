@@ -26,6 +26,7 @@ export interface SandboxConfig {
   remoteBranch?: string;
   prNumber?: string;
   dockerSocketPath?: string;
+  webUI?: boolean;
 }
 
 export interface Credentials {

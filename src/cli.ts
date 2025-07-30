@@ -37,6 +37,72 @@ async function ensureDockerConfig() {
   }
 }
 
+// Helper function to attach to container terminal directly
+async function attachToContainerTerminal(containerId: string, shell: string = "claude"): Promise<void> {
+  console.log(chalk.blue(`🔗 Attaching to container ${containerId.substring(0, 12)} with ${shell} shell...`));
+  
+  try {
+    const container = docker.getContainer(containerId);
+    
+    // Create exec session similar to web UI implementation
+    const exec = await container.exec({
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+      Cmd: shell === "bash" ? ["/bin/bash"] : ["/home/claude/start-session.sh"],
+      WorkingDir: "/workspace",
+      User: "claude",
+      Env: ["TERM=xterm-256color", "COLORTERM=truecolor"],
+    });
+
+    const stream = await exec.start({
+      hijack: true,
+      stdin: true,
+    });
+
+    // Set up TTY mode for proper terminal interaction
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.resume();
+
+    // Connect streams bidirectionally
+    stream.pipe(process.stdout);
+    process.stdin.pipe(stream);
+
+    console.log(chalk.green("✓ Connected to container terminal"));
+    console.log(chalk.gray("Press Ctrl+C to disconnect"));
+
+    // Handle cleanup on various exit conditions
+    const cleanup = () => {
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+      process.stdin.pause();
+      stream.end();
+      console.log(chalk.yellow("\n✓ Disconnected from container"));
+      process.exit(0);
+    };
+
+    // Handle various termination signals
+    process.once("SIGINT", cleanup);
+    process.once("SIGTERM", cleanup);
+    stream.once("end", cleanup);
+    stream.once("close", cleanup);
+
+    // Handle stream errors
+    stream.on("error", (err: Error) => {
+      console.error(chalk.red(`\nStream error: ${err.message}`));
+      cleanup();
+    });
+
+  } catch (error: any) {
+    console.error(chalk.red(`Failed to attach to container: ${error.message}`));
+    process.exit(1);
+  }
+}
+
 // Helper function to get Claude Sandbox containers
 async function getClaudeSandboxContainers() {
   const containers = await docker.listContainers({ all: true });
@@ -105,6 +171,7 @@ program
     "./claude-sandbox.config.json",
   )
   .option("-n, --name <name>", "Container name prefix")
+  .option("--no-web", "Disable web UI (use terminal attach)")
   .option("--no-push", "Disable automatic branch pushing")
   .option("--no-create-pr", "Disable automatic PR creation")
   .option(
@@ -136,19 +203,35 @@ program
     config.targetBranch = options.branch;
     config.remoteBranch = options.remoteBranch;
     config.prNumber = options.pr;
+    config.webUI = options.web !== false; // Add web UI control
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
     }
 
     const sandbox = new ClaudeSandbox(config);
-    await sandbox.run();
+    
+    if (options.web === false) {
+      // No-web mode: start container and directly attach
+      const containerId = await sandbox.startContainer();
+      await attachToContainerTerminal(containerId, options.shell || config.defaultShell);
+    } else {
+      // Normal web UI mode
+      await sandbox.run();
+    }
   });
 
 // Attach command - attach to existing container
 program
   .command("attach [container-id]")
   .description("Attach to an existing Claude Sandbox container")
-  .action(async (containerId) => {
+  .option("--no-web", "Use terminal attach instead of web UI")
+  .option(
+    "--shell <shell>",
+    "Shell to use when attaching (claude or bash)",
+    /^(claude|bash)$/i,
+    "claude"
+  )
+  .action(async (containerId, options) => {
     await ensureDockerConfig();
     const spinner = ora("Looking for containers...").start();
 
@@ -167,22 +250,28 @@ program
         }
       }
 
-      spinner.text = "Launching web UI...";
+      if (options.web === false) {
+        // Direct terminal attach
+        spinner.stop();
+        await attachToContainerTerminal(targetContainerId, options.shell);
+      } else {
+        // Web UI mode (default)
+        spinner.text = "Launching web UI...";
 
-      // Always launch web UI
-      const webServer = new WebUIServer(docker);
-      const url = await webServer.start();
-      const fullUrl = `${url}?container=${targetContainerId}`;
+        const webServer = new WebUIServer(docker);
+        const url = await webServer.start();
+        const fullUrl = `${url}?container=${targetContainerId}`;
 
-      spinner.succeed(chalk.green(`Web UI available at: ${fullUrl}`));
-      await webServer.openInBrowser(fullUrl);
+        spinner.succeed(chalk.green(`Web UI available at: ${fullUrl}`));
+        await webServer.openInBrowser(fullUrl);
 
-      console.log(
-        chalk.yellow("Keep this terminal open to maintain the session"),
-      );
+        console.log(
+          chalk.yellow("Keep this terminal open to maintain the session"),
+        );
 
-      // Keep process running
-      await new Promise(() => {});
+        // Keep process running
+        await new Promise(() => {});
+      }
     } catch (error: any) {
       spinner.fail(chalk.red(`Failed: ${error.message}`));
       process.exit(1);
