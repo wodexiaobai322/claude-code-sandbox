@@ -703,8 +703,9 @@ program
 
 // Exec command - execute claude command in container
 program
-  .command("exec [container-id] [prompt...]")
+  .command("exec [prompt...]")
   .description("Execute a Claude command in container (non-interactive)")
+  .option("--container <id>", "Container ID to execute command in")
   .option("-p, --print", "Print response and exit (default for exec)")
   .option("--output-format <format>", "Output format: text, json, stream-json", "text")
   .option("--input-format <format>", "Input format: text, stream-json", "text") 
@@ -719,12 +720,12 @@ program
   .option("--session-id <uuid>", "Use specific session ID")
   .option("--debug", "Enable debug mode")
   .option("--verbose", "Enable verbose mode")
-  .action(async (containerId, prompt, options) => {
+  .action(async (prompt, options) => {
     await ensureDockerConfig();
     let spinner: any = null;
 
     try {
-      let targetContainerId = containerId;
+      let targetContainerId = options.container;
 
       // If no container ID provided, show selection UI
       if (!targetContainerId) {
