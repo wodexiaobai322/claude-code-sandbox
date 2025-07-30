@@ -103,6 +103,169 @@ async function attachToContainerTerminal(containerId: string, shell: string = "c
   }
 }
 
+// Helper function to execute Claude command in container
+async function executeClaudeCommand(containerId: string, prompt: string[], options: any): Promise<void> {
+  try {
+    // Validate and sanitize container ID
+    if (!containerId || typeof containerId !== 'string' || containerId.trim() === '') {
+      throw new Error('Invalid container ID provided');
+    }
+    
+    const sanitizedContainerId = containerId.trim();
+    console.log(chalk.gray(`Using container: ${sanitizedContainerId.substring(0, 12)}`));
+    
+    const container = docker.getContainer(sanitizedContainerId);
+    
+    // Build Claude command arguments
+    const claudeArgs = ["claude"];
+    
+    // Always use --print for exec mode (non-interactive)
+    claudeArgs.push("--print");
+    
+    // Add command line options
+    if (options.outputFormat && options.outputFormat !== "text") {
+      claudeArgs.push("--output-format", options.outputFormat);
+    }
+    if (options.inputFormat && options.inputFormat !== "text") {
+      claudeArgs.push("--input-format", options.inputFormat);
+    }
+    if (options.model) {
+      claudeArgs.push("--model", options.model);
+    }
+    if (options.fallbackModel) {
+      claudeArgs.push("--fallback-model", options.fallbackModel);
+    }
+    if (options.permissionMode) {
+      claudeArgs.push("--permission-mode", options.permissionMode);
+    }
+    if (options.allowedTools) {
+      claudeArgs.push("--allowedTools", options.allowedTools.join(","));
+    }
+    if (options.disallowedTools) {
+      claudeArgs.push("--disallowedTools", options.disallowedTools.join(","));
+    }
+    if (options.appendSystemPrompt) {
+      claudeArgs.push("--append-system-prompt", options.appendSystemPrompt);
+    }
+    if (options.continue) {
+      claudeArgs.push("--continue");
+    }
+    if (options.resume) {
+      claudeArgs.push("--resume");
+      if (typeof options.resume === "string") {
+        claudeArgs.push(options.resume);
+      }
+    }
+    if (options.sessionId) {
+      claudeArgs.push("--session-id", options.sessionId);
+    }
+    if (options.debug) {
+      claudeArgs.push("--debug");
+    }
+    if (options.verbose) {
+      claudeArgs.push("--verbose");
+    }
+    
+    // Add the prompt (join array elements with spaces and properly quote)
+    if (prompt && prompt.length > 0) {
+      const promptText = prompt.join(" ");
+      claudeArgs.push(promptText);
+    }
+
+    console.log(chalk.blue(`🤖 Executing: ${claudeArgs.join(" ")}`));
+
+    // Create exec session for Claude command using bash -c to ensure proper shell environment
+    const commandString = claudeArgs.map(arg => {
+      // Escape arguments that contain spaces or special characters
+      if (arg.includes(" ") || arg.includes("'") || arg.includes('"')) {
+        return `"${arg.replace(/"/g, '\\"')}"`;
+      }
+      return arg;
+    }).join(" ");
+
+    const exec = await container.exec({
+      AttachStdin: false, // Claude --print doesn't need stdin
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false, // Use false for non-interactive command execution
+      Cmd: ["bash", "-c", commandString],
+      WorkingDir: "/workspace", 
+      User: "claude",
+      Env: [
+        "TERM=xterm-256color", 
+        "COLORTERM=truecolor",
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      ],
+    });
+
+    const stream = await exec.start({
+      hijack: true,
+      stdin: false, // No stdin needed for --print mode
+    });
+
+    // Handle stream data with proper Docker exec format parsing
+    stream.on("data", (chunk: Buffer) => {
+      // Parse Docker exec stream format
+      let dataToSend: Buffer;
+      
+      if (chunk.length > 8) {
+        const firstByte = chunk[0];
+        if (firstByte >= 1 && firstByte <= 3) {
+          // Docker exec stream format: first 8 bytes are header
+          dataToSend = chunk.slice(8);
+        } else {
+          dataToSend = chunk;
+        }
+      } else {
+        dataToSend = chunk;
+      }
+
+      if (dataToSend.length > 0) {
+        // Check if this is stdout (type 1) or stderr (type 2)
+        const streamType = chunk.length > 0 ? chunk[0] : 1;
+        if (streamType === 2) {
+          // Write stderr to stderr
+          process.stderr.write(dataToSend);
+        } else {
+          // Write stdout to stdout
+          process.stdout.write(dataToSend);
+        }
+      }
+    });
+
+    stream.on("error", (err: Error) => {
+      console.error(chalk.red(`Stream error: ${err.message}`));
+      process.exit(1);
+    });
+
+    // Wait for command to complete
+    await new Promise<void>((resolve, reject) => {
+      stream.on("end", async () => {
+        try {
+          // Get the exit code
+          const inspectResult = await exec.inspect();
+          const exitCode = inspectResult.ExitCode;
+          
+          if (exitCode !== 0) {
+            console.error(chalk.red(`Command exited with code ${exitCode}`));
+            process.exit(exitCode || 1);
+          }
+          
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+      
+      stream.on("error", reject);
+    });
+
+  } catch (error: any) {
+    console.error(chalk.red(`Failed to execute Claude command: ${error.message}`));
+    process.exit(1);
+  }
+}
+
 // Helper function to get Claude Sandbox containers
 async function getClaudeSandboxContainers() {
   const containers = await docker.listContainers({ all: true });
@@ -534,6 +697,66 @@ program
       }
     } catch (error: any) {
       console.error(chalk.red(`Purge failed: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// Exec command - execute claude command in container
+program
+  .command("exec [container-id] [prompt...]")
+  .description("Execute a Claude command in container (non-interactive)")
+  .option("-p, --print", "Print response and exit (default for exec)")
+  .option("--output-format <format>", "Output format: text, json, stream-json", "text")
+  .option("--input-format <format>", "Input format: text, stream-json", "text") 
+  .option("--model <model>", "Model to use for the session")
+  .option("--fallback-model <model>", "Fallback model when default is overloaded")
+  .option("--permission-mode <mode>", "Permission mode: acceptEdits, bypassPermissions, default, plan")
+  .option("--allowedTools <tools...>", "Comma or space-separated list of allowed tools")
+  .option("--disallowedTools <tools...>", "Comma or space-separated list of disallowed tools")
+  .option("--append-system-prompt <prompt>", "Append system prompt")
+  .option("-c, --continue", "Continue the most recent conversation")
+  .option("-r, --resume [sessionId]", "Resume a conversation")
+  .option("--session-id <uuid>", "Use specific session ID")
+  .option("--debug", "Enable debug mode")
+  .option("--verbose", "Enable verbose mode")
+  .action(async (containerId, prompt, options) => {
+    await ensureDockerConfig();
+    let spinner: any = null;
+
+    try {
+      let targetContainerId = containerId;
+
+      // If no container ID provided, show selection UI
+      if (!targetContainerId) {
+        spinner = ora("Looking for containers...").start();
+        const containers = await getClaudeSandboxContainers();
+        const runningContainers = containers.filter(
+          (c) => c.State === "running",
+        );
+        spinner.stop();
+        
+        targetContainerId = await selectContainer(runningContainers);
+
+        if (!targetContainerId) {
+          console.log(chalk.red("No container selected."));
+          process.exit(1);
+        }
+      }
+
+      // Validate container ID before executing
+      if (!targetContainerId || typeof targetContainerId !== 'string') {
+        throw new Error('Invalid container ID');
+      }
+
+      // Execute claude command in container
+      await executeClaudeCommand(targetContainerId, prompt, options);
+
+    } catch (error: any) {
+      if (spinner) {
+        spinner.fail(chalk.red(`Failed: ${error.message}`));
+      } else {
+        console.error(chalk.red(`Failed: ${error.message}`));
+      }
       process.exit(1);
     }
   });
