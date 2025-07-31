@@ -113,7 +113,14 @@ export class ContainerManager {
     const dockerfile = `
 FROM ubuntu:22.04
 
-# Install system dependencies
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set locale to support Chinese characters
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Install system dependencies including Chinese language support
 RUN apt-get update && apt-get install -y \\
     curl \\
     git \\
@@ -125,17 +132,19 @@ RUN apt-get update && apt-get install -y \\
     vim \\
     ca-certificates \\
     gnupg \\
+    locales \\
+    language-pack-zh-hans \\
     && rm -rf /var/lib/apt/lists/*
+
+# Generate UTF-8 locale
+RUN locale-gen en_US.UTF-8 zh_CN.UTF-8 && \\
+    update-locale LANG=C.UTF-8
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
     && apt-get install -y nodejs
 
-# Install GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\
-    && apt-get update \\
-    && apt-get install -y gh
+# Skip GitHub CLI installation to avoid slow network requests
 
 # Install Claude Code
 RUN npm install -g @anthropic-ai/claude-code@latest
