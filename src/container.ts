@@ -13,6 +13,18 @@ export class ContainerManager {
     this.config = config;
   }
 
+  private getContainerName(): string {
+    // If user explicitly provided a custom name via --name option,
+    // use it as-is without adding timestamp
+    if (this.config.customContainerName && this.config.containerPrefix) {
+      return this.config.containerPrefix;
+    }
+    
+    // Default behavior: add timestamp to avoid conflicts
+    const prefix = this.config.containerPrefix || "claude-code-sandbox";
+    return `${prefix}-${Date.now()}`;
+  }
+
   async start(containerConfig: any): Promise<string> {
     // Build or pull image
     await this.ensureImage();
@@ -259,11 +271,10 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     const volumes = this.prepareVolumes(workDir, credentials);
 
     // Create container
+    const containerName = this.getContainerName();
     const container = await this.docker.createContainer({
       Image: this.config.dockerImage || "claude-code-sandbox:latest",
-      name: `${
-        this.config.containerPrefix || "claude-code-sandbox"
-      }-${Date.now()}`,
+      name: containerName,
       Env: env,
       HostConfig: {
         Binds: volumes,

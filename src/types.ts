@@ -8,6 +8,7 @@ export interface SandboxConfig {
   dockerImage?: string;
   dockerfile?: string;
   containerPrefix?: string;
+  customContainerName?: boolean; // Flag to indicate if container name was explicitly provided by user
   autoPush?: boolean;
   autoCreatePR?: boolean;
   autoStartClaude?: boolean;

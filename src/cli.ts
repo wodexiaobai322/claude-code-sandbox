@@ -372,6 +372,7 @@ program
 
     const config = await loadConfig(options.config);
     config.containerPrefix = options.name || config.containerPrefix;
+    config.customContainerName = !!options.name; // Set flag if user provided custom name
     config.autoPush = options.push !== false;
     config.autoCreatePR = options.createPr !== false;
     config.includeUntracked = options.includeUntracked || false;
