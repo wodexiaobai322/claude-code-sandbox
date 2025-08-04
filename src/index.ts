@@ -224,30 +224,37 @@ export class ClaudeSandbox {
         return { isGitRepo: false };
       }
 
-      // Check if current working directory is a git working tree
+      // Use configured working directory or fall back to current directory
+      const workDir = this.config.workingDirectory || process.cwd();
+      console.log(chalk.gray(`🔍 Git check in directory: ${workDir}`));
+
+      // Check if working directory is a git working tree
       const { exec } = require("child_process");
       const { promisify } = require("util");
       const execAsync = promisify(exec);
       
       try {
-        // Check if current directory is in a git working tree and has .git
+        // Check if working directory is in a git working tree and has .git
         await execAsync("git rev-parse --is-inside-work-tree", { 
-          cwd: process.cwd() 
+          cwd: workDir 
         });
         
-        // Also check if .git directory exists in current directory or its parents
+        // Also check if .git directory exists in working directory or its parents
         await execAsync("git rev-parse --git-dir", { 
-          cwd: process.cwd() 
+          cwd: workDir 
         });
         
         // If we get here, we're in a valid git working tree
-        const currentBranch = await this.git.branchLocal();
+        // Create a new git instance for the correct working directory
+        const workDirGit = simpleGit(workDir);
+        const currentBranch = await workDirGit.branchLocal();
         return {
           isGitRepo: true,
           currentBranch: currentBranch.current,
         };
       } catch (gitError) {
         // Not in a git working tree or git commands failed
+        console.log(chalk.gray(`🔍 Git check failed in ${workDir}: not a git repository`));
         return { isGitRepo: false };
       }
     } catch (error) {

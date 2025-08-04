@@ -632,6 +632,13 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
         actualGitStatus = { isGitRepo: false };
         console.log(chalk.blue(`• Working directory is not a git repository`));
       }
+      
+      // 重要：如果Git状态发生了变化，我们需要通知调用者
+      // 但由于这是在文件复制阶段，我们只能在日志中提醒
+      if (actualGitStatus.isGitRepo !== gitStatus?.isGitRepo) {
+        console.log(chalk.yellow(`⚠️ Git status mismatch: original=${gitStatus?.isGitRepo}, working_dir=${actualGitStatus.isGitRepo}`));
+        console.log(chalk.yellow(`⚠️ Container git setup may fail if working directory is not a git repository`));
+      }
     } else if (this.config.autoCreateWorkDir && this.config.workDirTemplate) {
       // 如果没有指定工作目录但设置了自动创建，创建一个空的项目目录
       const taskId = `${Date.now()}`;
