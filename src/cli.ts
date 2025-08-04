@@ -339,10 +339,15 @@ program
       config.defaultShell = options.shell.toLowerCase();
     }
 
-    // Handle working directory options
+    // Handle working directory options (default command)
+    console.log(chalk.gray(`🔍 Debug (default): options.workDir = "${options.workDir}"`));
+    console.log(chalk.gray(`🔍 Debug (default): typeof options.workDir = "${typeof options.workDir}"`));
+    
     if (options.workDir) {
       config.workingDirectory = options.workDir;
       console.log(chalk.blue(`📁 Using working directory: ${options.workDir}`));
+    } else {
+      console.log(chalk.yellow(`⚠️ No working directory specified in options (default)`));
     }
     
     if (options.autoCreateWorkDir) {
@@ -432,10 +437,15 @@ program
       config.defaultShell = options.shell.toLowerCase();
     }
 
-    // Handle working directory options
+    // Handle working directory options (start command)
+    console.log(chalk.gray(`🔍 Debug (start): options.workDir = "${options.workDir}"`));
+    console.log(chalk.gray(`🔍 Debug (start): typeof options.workDir = "${typeof options.workDir}"`));
+    
     if (options.workDir) {
       config.workingDirectory = options.workDir;
       console.log(chalk.blue(`📁 Using working directory: ${options.workDir}`));
+    } else {
+      console.log(chalk.yellow(`⚠️ No working directory specified in options (start)`));
     }
     
     if (options.autoCreateWorkDir) {
