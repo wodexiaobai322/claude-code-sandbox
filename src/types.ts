@@ -29,6 +29,10 @@ export interface SandboxConfig {
   dockerSocketPath?: string;
   webUI?: boolean;
   noGit?: boolean; // Disable git functionality
+  // 新增：工作目录相关配置
+  workingDirectory?: string;  // 指定工作目录路径
+  autoCreateWorkDir?: boolean; // 是否自动创建工作目录
+  workDirTemplate?: string;   // 工作目录模板（如output/projects/ProjectName_timestamp）
 }
 
 export interface Credentials {

@@ -286,7 +286,11 @@ Create a `claude-sandbox.config.json` file (see `claude-sandbox.config.example.j
   "maxThinkingTokens": 100000,
   "bashTimeout": 600000,
   "containerPrefix": "my-project",
-  "claudeConfigPath": "~/.claude.json"
+  "claudeConfigPath": "~/.claude.json",
+  
+  "workingDirectory": null,
+  "autoCreateWorkDir": false,
+  "workDirTemplate": "output/projects/Project_{timestamp}"
 }
 ```
 
@@ -310,6 +314,9 @@ Create a `claude-sandbox.config.json` file (see `claude-sandbox.config.example.j
 - `containerPrefix`: Custom prefix for container names
 - `claudeConfigPath`: Path to Claude configuration file
 - `dockerSocketPath`: Custom Docker/Podman socket path (auto-detected by default)
+- `workingDirectory`: Specify a custom working directory path to copy into the container (optional)
+- `autoCreateWorkDir`: Automatically create the working directory if it doesn't exist (default: false)
+- `workDirTemplate`: Template for auto-generated working directories, supports `{timestamp}` and `{taskId}` placeholders
 
 #### Mount Configuration
 
@@ -363,6 +370,91 @@ claude-sandbox start --no-git
   "autoCreatePR": false
 }
 ```
+
+### Working Directory Management
+
+Claude Code Sandbox now supports flexible working directory management, allowing you to control what files are copied into the container:
+
+**Key Features:**
+- **Custom Working Directory**: Specify any directory to use as the source instead of the current directory
+- **Auto-Creation**: Automatically create working directories if they don't exist
+- **Template Support**: Use templates to generate project directories with timestamps and task IDs
+- **Empty Directory Support**: Start with completely empty project directories for new development
+
+**Configuration Options:**
+```json
+{
+  "workingDirectory": "/path/to/project",
+  "autoCreateWorkDir": true,
+  "workDirTemplate": "output/projects/Project_{timestamp}_{taskId}"
+}
+```
+
+**Use Cases:**
+
+1. **Custom Project Directory:**
+   ```json
+   {
+     "workingDirectory": "./my-project",
+     "autoCreateWorkDir": true
+   }
+   ```
+
+2. **Auto-Generated Project Directories:**
+   ```json
+   {
+     "autoCreateWorkDir": true,
+     "workDirTemplate": "output/projects/{taskId}_{timestamp}"
+   }
+   ```
+
+3. **Empty Development Environment:**
+   ```json
+   {
+     "workingDirectory": null,
+     "autoCreateWorkDir": true,
+     "workDirTemplate": "workspace/new_project_{timestamp}"
+   }
+   ```
+
+**Template Placeholders:**
+- `{timestamp}`: Current timestamp in ISO format (e.g., "2025-01-04T14-30-00")  
+- `{taskId}`: Task identifier (when provided programmatically)
+
+**Integration Example:**
+```javascript
+// Programmatic usage with custom working directory
+const containerManager = new ContainerManager(docker, config);
+
+// Create a new empty working directory
+const workDir = await containerManager.createWorkingDirectory("task123");
+console.log(`Created working directory: ${workDir}`);
+
+// Start container with the new working directory
+await containerManager.start(containerConfig);
+```
+
+**CLI Usage Examples:**
+
+```bash
+# Use a specific working directory
+claude-sandbox start --work-dir ./my-project
+
+# Auto-create working directory if it doesn't exist
+claude-sandbox start --work-dir ./new-project --auto-create-work-dir
+
+# Create project directory from template
+claude-sandbox --auto-create-work-dir --work-dir-template "projects/Task_{timestamp}"
+
+# Combine with other options
+claude-sandbox start --work-dir ./my-app --auto-create-work-dir --no-git --shell bash
+```
+
+This feature is particularly useful for:
+- **CodeAgent Integration**: Creating isolated project workspaces
+- **Multi-Project Development**: Managing separate environments for different tasks
+- **Clean Starts**: Beginning projects with empty directories
+- **Automation**: Programmatically creating project spaces with unique identifiers
 
 ### Podman Support
 

@@ -313,6 +313,18 @@ program
   )
   .option("--git", "Enable git functionality (default)", true)
   .option("--no-git", "Disable git functionality (for non-git directories)")
+  .option(
+    "--work-dir <path>",
+    "Specify working directory to copy into container (overrides current directory)",
+  )
+  .option(
+    "--auto-create-work-dir",
+    "Automatically create working directory if it doesn't exist",
+  )
+  .option(
+    "--work-dir-template <template>",
+    "Template for auto-generated working directories (supports {timestamp}, {taskId})",
+  )
   .action(async (options) => {
     console.log(chalk.blue("🚀 Starting Claude Sandbox..."));
 
@@ -325,6 +337,22 @@ program
     config.noGit = noGitExplicit;
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
+    }
+
+    // Handle working directory options
+    if (options.workDir) {
+      config.workingDirectory = options.workDir;
+      console.log(chalk.blue(`📁 Using working directory: ${options.workDir}`));
+    }
+    
+    if (options.autoCreateWorkDir) {
+      config.autoCreateWorkDir = true;
+      console.log(chalk.blue("🔧 Auto-create working directory enabled"));
+    }
+    
+    if (options.workDirTemplate) {
+      config.workDirTemplate = options.workDirTemplate;
+      console.log(chalk.blue(`📋 Working directory template: ${options.workDirTemplate}`));
     }
 
     const sandbox = new ClaudeSandbox(config);
@@ -364,6 +392,18 @@ program
     "Start with 'claude' or 'bash' shell",
     /^(claude|bash)$/i,
   )
+  .option(
+    "--work-dir <path>",
+    "Specify working directory to copy into container (overrides current directory)",
+  )
+  .option(
+    "--auto-create-work-dir",
+    "Automatically create working directory if it doesn't exist",
+  )
+  .option(
+    "--work-dir-template <template>",
+    "Template for auto-generated working directories (supports {timestamp}, {taskId})",
+  )
   .action(async (options) => {
     console.log(chalk.blue("🚀 Starting new Claude Sandbox container..."));
 
@@ -390,6 +430,22 @@ program
     
     if (options.shell) {
       config.defaultShell = options.shell.toLowerCase();
+    }
+
+    // Handle working directory options
+    if (options.workDir) {
+      config.workingDirectory = options.workDir;
+      console.log(chalk.blue(`📁 Using working directory: ${options.workDir}`));
+    }
+    
+    if (options.autoCreateWorkDir) {
+      config.autoCreateWorkDir = true;
+      console.log(chalk.blue("🔧 Auto-create working directory enabled"));
+    }
+    
+    if (options.workDirTemplate) {
+      config.workDirTemplate = options.workDirTemplate;
+      console.log(chalk.blue(`📋 Working directory template: ${options.workDirTemplate}`));
     }
 
     const sandbox = new ClaudeSandbox(config);

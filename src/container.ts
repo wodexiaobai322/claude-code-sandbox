@@ -13,6 +13,40 @@ export class ContainerManager {
     this.config = config;
   }
 
+  /**
+   * 设置工作目录配置
+   * @param workingDirectory 工作目录路径
+   * @param autoCreate 是否自动创建目录
+   * @param template 目录模板
+   */
+  public setWorkingDirectoryConfig(
+    workingDirectory?: string,
+    autoCreate: boolean = true,
+    template?: string
+  ): void {
+    this.config.workingDirectory = workingDirectory;
+    this.config.autoCreateWorkDir = autoCreate;
+    if (template) {
+      this.config.workDirTemplate = template;
+    }
+  }
+
+  /**
+   * 创建空的工作目录并返回路径
+   * @param taskId 任务ID（可选）
+   * @returns 创建的目录路径
+   */
+  public async createWorkingDirectory(taskId?: string): Promise<string> {
+    const workDirPath = this.createEmptyProjectDirectory(taskId);
+    await this.ensureWorkingDirectory(workDirPath);
+    
+    // 设置为当前的工作目录
+    this.config.workingDirectory = workDirPath;
+    this.config.autoCreateWorkDir = false; // 已经创建了，不需要再自动创建
+    
+    return workDirPath;
+  }
+
   private getContainerName(): string {
     // If user explicitly provided a custom name via --name option,
     // use it as-is without adding timestamp
@@ -553,6 +587,62 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     const { execSync } = require("child_process");
     const fs = require("fs");
 
+    // 确定实际的源目录
+    let sourceDir = workDir;
+    let actualGitStatus = gitStatus;
+
+    // 处理工作目录配置
+    if (this.config.workingDirectory) {
+      console.log(chalk.blue(`• Using configured working directory: ${this.config.workingDirectory}`));
+      
+      // 如果设置了自动创建工作目录
+      if (this.config.autoCreateWorkDir) {
+        await this.ensureWorkingDirectory(this.config.workingDirectory);
+      }
+      
+      sourceDir = this.config.workingDirectory;
+      
+      // 重新检测Git状态（因为可能切换到了不同的目录）
+      try {
+        const gitCheckResult = execSync("git rev-parse --is-inside-work-tree", {
+          cwd: sourceDir,
+          encoding: "utf-8",
+          stdio: "pipe",
+        });
+        if (gitCheckResult.trim() === "true") {
+          // 获取当前分支
+          let currentBranch;
+          try {
+            currentBranch = execSync("git branch --show-current", {
+              cwd: sourceDir,
+              encoding: "utf-8",
+              stdio: "pipe",
+            }).trim();
+          } catch {
+            currentBranch = undefined;
+          }
+          
+          actualGitStatus = { isGitRepo: true, currentBranch };
+          console.log(chalk.blue(`• Detected git repository in working directory, branch: ${currentBranch || 'unknown'}`));
+        } else {
+          actualGitStatus = { isGitRepo: false };
+          console.log(chalk.blue(`• Working directory is not a git repository`));
+        }
+      } catch {
+        actualGitStatus = { isGitRepo: false };
+        console.log(chalk.blue(`• Working directory is not a git repository`));
+      }
+    } else if (this.config.autoCreateWorkDir && this.config.workDirTemplate) {
+      // 如果没有指定工作目录但设置了自动创建，创建一个空的项目目录
+      const taskId = `${Date.now()}`;
+      sourceDir = this.createEmptyProjectDirectory(taskId);
+      await this.ensureWorkingDirectory(sourceDir);
+      actualGitStatus = { isGitRepo: false }; // 新创建的目录不是git仓库
+      console.log(chalk.blue(`• Created and using empty project directory: ${sourceDir}`));
+    }
+
+    console.log(chalk.blue(`• Copying files from: ${sourceDir}`));
+
     // Helper function to get tar flags safely
     const getTarFlags = () => {
       try {
@@ -568,13 +658,13 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     try {
       let allFiles: string[] = [];
 
-      if (gitStatus?.isGitRepo) {
+      if (actualGitStatus?.isGitRepo) {
         // Git mode: use git commands to get file lists
         console.log(chalk.blue("• Using git-based file discovery"));
 
         // Get list of git-tracked files (including uncommitted changes)
         const trackedFiles = execSync("git ls-files", {
-          cwd: workDir,
+          cwd: sourceDir,
           encoding: "utf-8",
         })
           .trim()
@@ -585,7 +675,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
         let untrackedFiles: string[] = [];
         if (this.config.includeUntracked) {
           untrackedFiles = execSync("git ls-files --others --exclude-standard", {
-            cwd: workDir,
+            cwd: sourceDir,
             encoding: "utf-8",
           })
             .trim()
@@ -598,7 +688,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       } else {
         // Non-git mode: use filesystem traversal
         console.log(chalk.blue("• Using filesystem-based file discovery"));
-        allFiles = this.getAllFiles(workDir);
+        allFiles = this.getAllFiles(sourceDir);
       }
 
       console.log(chalk.blue(`• Copying ${allFiles.length} files...`));
@@ -606,13 +696,13 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       // Create tar archive
       const tarFile = `/tmp/claude-sandbox-${Date.now()}.tar`;
 
-      if (gitStatus?.isGitRepo) {
+      if (actualGitStatus?.isGitRepo) {
         // Git mode: try git archive first, fallback to filesystem if it fails
         try {
           let untrackedFiles: string[] = [];
           if (this.config.includeUntracked) {
             untrackedFiles = execSync("git ls-files --others --exclude-standard", {
-              cwd: workDir,
+              cwd: sourceDir,
               encoding: "utf-8",
             })
               .trim()
@@ -622,7 +712,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
 
           // First create archive of tracked files using git archive
           execSync(`git archive --format=tar -o "${tarFile}" HEAD`, {
-            cwd: workDir,
+            cwd: sourceDir,
             stdio: "pipe",
           });
 
@@ -634,7 +724,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
 
             // Append untracked files to the tar
             execSync(`tar -rf "${tarFile}" --files-from="${fileListPath}"`, {
-              cwd: workDir,
+              cwd: sourceDir,
               stdio: "pipe",
             });
 
@@ -644,7 +734,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
           // Git archive failed (e.g., no commits, untracked directory)
           // Fall back to filesystem-based file discovery
           console.log(chalk.yellow("• Git archive failed, falling back to filesystem discovery"));
-          allFiles = this.getAllFiles(workDir);
+          allFiles = this.getAllFiles(sourceDir);
           
           // Create tar archive from file list
           if (allFiles.length > 0) {
@@ -653,7 +743,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
 
             const tarFlags = getTarFlags();
             execSync(`tar -cf "${tarFile}" ${tarFlags} --files-from="${fileListPath}"`, {
-              cwd: workDir,
+              cwd: sourceDir,
               stdio: "pipe",
             });
 
@@ -661,7 +751,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
           } else {
             // Create empty tar if no files
             execSync(`tar -cf "${tarFile}" --files-from=/dev/null`, {
-              cwd: workDir,
+              cwd: sourceDir,
               stdio: "pipe",
             });
           }
@@ -674,7 +764,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
 
           const tarFlags = getTarFlags();
           execSync(`tar -cf "${tarFile}" ${tarFlags} --files-from="${fileListPath}"`, {
-            cwd: workDir,
+            cwd: sourceDir,
             stdio: "pipe",
           });
 
@@ -682,7 +772,7 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
         } else {
           // Create empty tar if no files
           execSync(`tar -cf "${tarFile}" --files-from=/dev/null`, {
-            cwd: workDir,
+            cwd: sourceDir,
             stdio: "pipe",
           });
         }
@@ -711,9 +801,9 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
       fs.unlinkSync(tarFile);
 
       // Copy .git directory only in git mode
-      if (gitStatus?.isGitRepo) {
+      if (actualGitStatus?.isGitRepo) {
         console.log(chalk.blue("• Copying git history..."));
-        await this.copyGitHistory(container, workDir);
+        await this.copyGitHistory(container, sourceDir);
       } else {
         console.log(chalk.yellow("• Skipping git history copy (non-git mode)"));
       }
@@ -761,6 +851,77 @@ exec claude --dangerously-skip-permissions' > /start-claude.sh && \\
     
     getAllFilesRecursive(workDir);
     return files;
+  }
+
+  /**
+   * 确保工作目录存在，如果不存在则创建
+   * @param workDirPath 工作目录路径
+   */
+  private async ensureWorkingDirectory(workDirPath: string): Promise<void> {
+    const fs = require("fs");
+    const path = require("path");
+    
+    try {
+      // 如果目录已存在，直接返回
+      if (fs.existsSync(workDirPath)) {
+        console.log(chalk.blue(`• Working directory already exists: ${workDirPath}`));
+        return;
+      }
+      
+      // 创建目录（包括父目录）
+      fs.mkdirSync(workDirPath, { recursive: true });
+      console.log(chalk.green(`✓ Created working directory: ${workDirPath}`));
+      
+      // 可选：创建一个README文件说明这是一个工作目录
+      const readmePath = path.join(workDirPath, "README.md");
+      const readmeContent = `# 工作目录
+
+这是一个由 claude-code-sandbox 自动创建的工作目录。
+
+创建时间: ${new Date().toISOString()}
+
+该目录用于存放项目文件，在容器启动时会被复制到容器的 /workspace 目录下。
+`;
+      
+      fs.writeFileSync(readmePath, readmeContent, "utf-8");
+      console.log(chalk.blue(`• Created README.md in working directory`));
+      
+    } catch (error) {
+      console.error(chalk.red(`✗ Failed to create working directory: ${workDirPath}`), error);
+      throw error;
+    }
+  }
+
+  /**
+   * 创建空的项目工作目录
+   * @param taskId 任务ID（可选）
+   * @returns 创建的目录路径
+   */
+  private createEmptyProjectDirectory(taskId?: string): string {
+    const path = require("path");
+    
+    // 使用配置中的模板或默认模板
+    let template = this.config.workDirTemplate || "output/projects/Project_{timestamp}";
+    
+    // 替换占位符
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    template = template.replace('{timestamp}', timestamp);
+    
+    if (taskId) {
+      template = template.replace('{taskId}', taskId);
+    }
+    
+    // 如果模板中没有taskId占位符但有taskId，添加到目录名中
+    if (taskId && !this.config.workDirTemplate?.includes('{taskId}')) {
+      template = `${template}_${taskId.slice(0, 8)}`;
+    }
+    
+    // 确保路径是绝对路径
+    const workDirPath = path.isAbsolute(template) ? template : path.resolve(process.cwd(), template);
+    
+    console.log(chalk.blue(`• Creating empty project directory: ${workDirPath}`));
+    
+    return workDirPath;
   }
 
   private async copyGitHistory(container: Docker.Container, workDir: string): Promise<void> {

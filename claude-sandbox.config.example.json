@@ -28,5 +28,15 @@
   "bashTimeout": 600000,
   "containerPrefix": "claude-code-sandbox",
   "claudeConfigPath": "~/.claude.json",
-  "dockerSocketPath": null
+  "dockerSocketPath": null,
+  
+  "_comment_workingDirectory": "===== 工作目录配置 (新增功能) =====",
+  "workingDirectory": null,
+  "_comment_workingDirectory_value": "指定工作目录路径，如: '/path/to/project' 或 './output/projects/MyProject'",
+  
+  "autoCreateWorkDir": false,
+  "_comment_autoCreateWorkDir": "是否自动创建工作目录（当workingDirectory不存在时）",
+  
+  "workDirTemplate": "output/projects/Project_{timestamp}",
+  "_comment_workDirTemplate": "工作目录模板，支持占位符: {timestamp}, {taskId}"
 }
