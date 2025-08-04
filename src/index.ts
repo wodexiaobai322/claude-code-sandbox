@@ -263,7 +263,8 @@ export class ClaudeSandbox {
     remoteFetchRef?: string,
     gitStatus?: { isGitRepo: boolean; currentBranch?: string },
   ): Promise<any> {
-    const workDir = process.cwd();
+    // Use configured working directory or fall back to current directory
+    const workDir = this.config.workingDirectory || process.cwd();
     const repoName = path.basename(workDir);
 
     return {
