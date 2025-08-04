@@ -340,24 +340,50 @@ program
     }
 
     // Handle working directory options (default command)
+    console.log(chalk.gray(`🔍 Debug (default): Full options object:`));
+    console.log(chalk.gray(JSON.stringify(options, null, 2)));
     console.log(chalk.gray(`🔍 Debug (default): options.workDir = "${options.workDir}"`));
     console.log(chalk.gray(`🔍 Debug (default): typeof options.workDir = "${typeof options.workDir}"`));
+    console.log(chalk.gray(`🔍 Debug (default): process.argv includes --work-dir: ${process.argv.includes('--work-dir')}"`));
     
-    if (options.workDir) {
-      config.workingDirectory = options.workDir;
-      console.log(chalk.blue(`📁 Using working directory: ${options.workDir}`));
+    // Try to get working directory from options first, then fallback to process.argv
+    let workDir = options.workDir;
+    
+    // Fallback: manually parse from process.argv if Commander.js failed
+    if (!workDir) {
+      const workDirIndex = process.argv.findIndex(arg => arg === '--work-dir');
+      if (workDirIndex !== -1 && workDirIndex + 1 < process.argv.length) {
+        workDir = process.argv[workDirIndex + 1];
+        console.log(chalk.yellow(`🔄 Fallback: Found --work-dir in process.argv: ${workDir}`));
+      }
+    }
+    
+    if (workDir) {
+      config.workingDirectory = workDir;
+      console.log(chalk.blue(`📁 Using working directory: ${workDir}`));
     } else {
       console.log(chalk.yellow(`⚠️ No working directory specified in options (default)`));
     }
     
-    if (options.autoCreateWorkDir) {
+    // Check auto-create option with fallback (default command)
+    if (options.autoCreateWorkDir || process.argv.includes('--auto-create-work-dir')) {
       config.autoCreateWorkDir = true;
       console.log(chalk.blue("🔧 Auto-create working directory enabled"));
     }
     
-    if (options.workDirTemplate) {
-      config.workDirTemplate = options.workDirTemplate;
-      console.log(chalk.blue(`📋 Working directory template: ${options.workDirTemplate}`));
+    // Check template option with fallback (default command)
+    let workDirTemplate = options.workDirTemplate;
+    if (!workDirTemplate) {
+      const templateIndex = process.argv.findIndex(arg => arg === '--work-dir-template');
+      if (templateIndex !== -1 && templateIndex + 1 < process.argv.length) {
+        workDirTemplate = process.argv[templateIndex + 1];
+        console.log(chalk.yellow(`🔄 Fallback: Found --work-dir-template in process.argv: ${workDirTemplate}`));
+      }
+    }
+    
+    if (workDirTemplate) {
+      config.workDirTemplate = workDirTemplate;
+      console.log(chalk.blue(`📋 Working directory template: ${workDirTemplate}`));
     }
 
     const sandbox = new ClaudeSandbox(config);
@@ -438,24 +464,50 @@ program
     }
 
     // Handle working directory options (start command)
+    console.log(chalk.gray(`🔍 Debug (start): Full options object:`));
+    console.log(chalk.gray(JSON.stringify(options, null, 2)));
     console.log(chalk.gray(`🔍 Debug (start): options.workDir = "${options.workDir}"`));
     console.log(chalk.gray(`🔍 Debug (start): typeof options.workDir = "${typeof options.workDir}"`));
+    console.log(chalk.gray(`🔍 Debug (start): process.argv includes --work-dir: ${process.argv.includes('--work-dir')}"`));
     
-    if (options.workDir) {
-      config.workingDirectory = options.workDir;
-      console.log(chalk.blue(`📁 Using working directory: ${options.workDir}`));
+    // Try to get working directory from options first, then fallback to process.argv
+    let workDir = options.workDir;
+    
+    // Fallback: manually parse from process.argv if Commander.js failed
+    if (!workDir) {
+      const workDirIndex = process.argv.findIndex(arg => arg === '--work-dir');
+      if (workDirIndex !== -1 && workDirIndex + 1 < process.argv.length) {
+        workDir = process.argv[workDirIndex + 1];
+        console.log(chalk.yellow(`🔄 Fallback: Found --work-dir in process.argv: ${workDir}`));
+      }
+    }
+    
+    if (workDir) {
+      config.workingDirectory = workDir;
+      console.log(chalk.blue(`📁 Using working directory: ${workDir}`));
     } else {
       console.log(chalk.yellow(`⚠️ No working directory specified in options (start)`));
     }
     
-    if (options.autoCreateWorkDir) {
+    // Check auto-create option with fallback (start command)
+    if (options.autoCreateWorkDir || process.argv.includes('--auto-create-work-dir')) {
       config.autoCreateWorkDir = true;
       console.log(chalk.blue("🔧 Auto-create working directory enabled"));
     }
     
-    if (options.workDirTemplate) {
-      config.workDirTemplate = options.workDirTemplate;
-      console.log(chalk.blue(`📋 Working directory template: ${options.workDirTemplate}`));
+    // Check template option with fallback (start command)
+    let workDirTemplate = options.workDirTemplate;
+    if (!workDirTemplate) {
+      const templateIndex = process.argv.findIndex(arg => arg === '--work-dir-template');
+      if (templateIndex !== -1 && templateIndex + 1 < process.argv.length) {
+        workDirTemplate = process.argv[templateIndex + 1];
+        console.log(chalk.yellow(`🔄 Fallback: Found --work-dir-template in process.argv: ${workDirTemplate}`));
+      }
+    }
+    
+    if (workDirTemplate) {
+      config.workDirTemplate = workDirTemplate;
+      console.log(chalk.blue(`📋 Working directory template: ${workDirTemplate}`));
     }
 
     const sandbox = new ClaudeSandbox(config);
